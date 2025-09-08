@@ -18,6 +18,7 @@ from app.api.routers.posture import router as posture_router
 from app.api.routers.biometrics import router as biometrics_router
 from app.api.routers.routine import router as routine_router
 from app.api.routers.config_router import router as config_router
+from app.api.routers.auth import router as auth_router
 
 settings = get_settings()
 
@@ -45,3 +46,4 @@ app.include_router(posture_router, prefix="", tags=["posture"])
 app.include_router(biometrics_router, prefix="", tags=["biometrics"])
 app.include_router(routine_router, prefix="", tags=["routine"])
 app.include_router(config_router, prefix="", tags=["config"])
+app.include_router(auth_router, prefix="", tags=["auth"])

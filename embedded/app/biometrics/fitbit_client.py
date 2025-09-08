@@ -12,6 +12,7 @@ import requests
 from loguru import logger
 
 from app.core.config import get_settings
+from app.biometrics.token_store import TokenStore
 from app.api.schemas import BiometricsOutput
 
 
@@ -22,7 +23,11 @@ class FitbitClient:
 
     def __init__(self, access_token: Optional[str] = None) -> None:
         self.settings = get_settings()
-        self.access_token = access_token
+        if access_token:
+            self.access_token = access_token
+        else:
+            tokens = TokenStore().load()
+            self.access_token = tokens.access_token if tokens else None
 
     def _headers(self) -> dict:
         if not self.access_token:
