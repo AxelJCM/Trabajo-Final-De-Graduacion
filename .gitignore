@@ -1,4 +1,26 @@
-# Byte-compiled / optimized / DLL files
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+.env
+
+# Node/React Native/Expo
+mobile/node_modules/
+mobile/.expo/
+mobile/.expo-shared/
+mobile/dist/
+mobile/coverage/
+
+# OS & IDE
+.DS_Store
+Thumbs.db
+.vscode/
+
+# Logs
+logs/
+*.log# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
 *$py.class

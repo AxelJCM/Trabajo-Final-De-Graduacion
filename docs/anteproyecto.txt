@@ -1,0 +1,655 @@
+--- Página 1 ---
+
+
+Instituto Tecnológico de Costa Rica
+Área Académica de Ingeniería en Computadores
+(Computer Engineering Academic Area)
+Programa de Licenciatura en Ingeniería en Computadores
+(Licentiate Degree Program in Computer Engineering)
+Espejo Interactivo de Bienestar y Ejercicio Personalizado con Inteligencia Artificial
+(Interactive Mirror for Personalized Wellness and Exercise Using Artificial Intelligence)
+Informe del Anteproyecto para el Trabajo Final de Graduación
+(Report of Pre-project for Graduation Work in fulfillment of the requirements for the degree of Licentiate in
+Computer Engineering)
+Axel Josué Cordero Martínez
+Cartago, Julio, 2025
+(Cartago, July, 2025)
+1
+
+--- Página 2 ---
+
+
+índices:
+Palabras claves: ............................................................................................................ 3
+Introducción: ................................................................................................................ 3
+Contexto y antecedentes: .............................................................................................. 4
+a. Descripción de la organización/institución .............................................................. 4
+b. Área de conocimiento en que se desarrollará el proyecto .......................................... 4
+Descripción del proyecto: .............................................................................................. 5
+a. Justificación y definición del problema .................................................................... 5
+i. Contexto del problema o necesidad ...................................................................... 5
+ii. Justificación de la necesidad ............................................................................... 6
+iii. Enunciado del problema .................................................................................... 6
+b. Especificación de objetivos .................................................................................... 7
+Objetivo General: ................................................................................................... 7
+Objetivos específicos: ............................................................................................ 7
+c. Impactos del proyecto y sus resultados esperados ................................................... 7
+Resultados esperados ............................................................................................ 9
+d. Supuestos y limitaciones ...................................................................................... 10
+Supuestos: .......................................................................................................... 10
+Limitaciones: ....................................................................................................... 11
+e. Análisis de riesgos ................................................................................................ 11
+Propuesta metodológica: ............................................................................................ 12
+a. Tipificación del trabajo a realizar ........................................................................... 12
+b. Descripción general del proceso por realizar .......................................................... 13
+C. Tabla de relación entre objetivos del proyecto y proceso por realizar ....................... 15
+d. Cronograma propuesto para el proyecto ................................................................ 16
+Apéndice .................................................................................................................... 19
+Ficha de contactos del proyecto: .............................................................................. 19
+Referencias bibliográficas: .......................................................................................... 19
+2
+
+--- Página 3 ---
+
+
+Palabras claves:
+Espejo inteligente, sistemas embebidos, visión por computadora, inteligencia
+artificial, monitoreo fisiológico, entrenamiento personalizado.
+Introducción:
+En los últimos años, el concepto de bienestar personal ha adquirido una relevancia
+creciente, impulsado por la búsqueda de un equilibrio entre la salud física y mental, así
+como por el auge de tecnologías orientadas al autocuidado. Esta tendencia ha coincidido
+con una transformación en la manera en que las personas acceden a servicios relacionados
+con la actividad física, la relajación y el entrenamiento. Factores como la digitalización, el
+estilo de vida acelerado y la preferencia por alternativas más flexibles han generado una
+demanda sostenida por soluciones tecnológicas que permitan llevar a cabo rutinas de
+ejercicio desde el hogar de forma guiada, segura y personalizada.
+En este contexto, los dispositivos inteligentes han ganado terreno como herramientas clave
+para facilitar el acceso a prácticas saludables. Productos como relojes deportivos,
+aplicaciones móviles y sensores de salud permiten a los usuarios monitorear su condición
+física y seguir programas de entrenamiento. Sin embargo, muchos de estos sistemas
+carecen de interactividad en tiempo real, lo que limita su capacidad de adaptación al estado
+físico del usuario o a la corrección de errores posturales durante la actividad física.
+Con base en estas observaciones, este proyecto propone el desarrollo de un espejo
+interactivo de bienestar y ejercicio personalizado. A través de la integración de
+tecnologías como visión por computadora, datos biométricos provenientes de un reloj
+inteligente, asistentes de voz y una aplicación móvil complementaria, se plantea un sistema
+capaz de ofrecer una experiencia más completa y dinámica. El dispositivo está pensado
+para funcionar como un entrenador virtual dentro del hogar, guiando al usuario mediante
+rutinas adaptadas a sus objetivos personales (como tonificación, relajación o pérdida de
+peso), y proporcionando retroalimentación inmediata sobre su ejecución.
+La idea es construir una solución viable dentro de los recursos disponibles en un entorno
+universitario, enfocada en la funcionalidad básica pero efectiva: análisis de postura en
+tiempo real, control manos libres, monitoreo de ritmo cardíaco y visualización de progreso.
+De esta forma, se busca demostrar cómo es posible, desde la Ingeniería en Computadores,
+aportar al campo del bienestar físico y mental mediante un sistema práctico, útil y
+tecnológicamente fundamentado.
+3
+
+--- Página 4 ---
+
+
+Contexto y antecedentes:
+a. Descripción de la organización/institución
+El proyecto se desarrollará en el Instituto Tecnológico de Costa Rica (ITCR), también
+conocido como TEC, una institución pública de educación superior creada en 1971
+mediante la Ley No. 4777. Desde sus inicios, el TEC ha estado enfocado en la formación de
+profesionales en áreas científico-tecnológicas con un fuerte componente de ingeniería
+aplicada, consolidándose como una de las universidades técnicas más importantes de
+Costa Rica y la región centroamericana.
+El TEC cuenta con varios campus a nivel nacional, siendo el Campus Central de Cartago el
+más importante y el lugar donde se llevará a cabo este Trabajo Final de Graduación. Este
+campus está ubicado en la ciudad de Cartago y alberga múltiples escuelas, laboratorios e
+instalaciones académicas y administrativas. Dentro del campus, el proyecto se desarrollará
+bajo la supervisión del Área Académica de Ingeniería en Computadores, adscrita a la
+Escuela de Ingeniería Electrónica.
+La carrera de Ingeniería en Computadores se caracteriza por su enfoque en la integración
+de software y hardware, la solución de problemas mediante sistemas empotrados, el diseño
+digital, el desarrollo de aplicaciones con procesamiento intensivo, y la implementación de
+soluciones tecnológicas con aplicación real. La estructura del área incluye laboratorios
+especializados, personal docente con experiencia académica e industrial, y una malla
+curricular que promueve la investigación aplicada y la innovación tecnológica. El
+anteproyecto será realizado como parte del curso formal de TFG, bajo las condiciones
+establecidas por el programa, con el uso de recursos institucionales disponibles y bajo
+supervisión académica.
+b. Área de conocimiento en que se desarrollará el proyecto
+Este proyecto se enmarca principalmente en las siguientes áreas de conocimiento definidas
+por la carrera de Ingeniería en Computadores:
+• Desarrollo de sistemas empotrados: el espejo interactivo se basará en una
+plataforma de procesamiento embebido capaz de controlar sensores, ejecutar
+software personalizado y ofrecer respuesta en tiempo real.
+• Procesamiento de imágenes y reconocimiento de patrones: se utilizarán técnicas de
+visión por computadora para analizar la postura del usuario y ofrecer
+retroalimentación visual durante el ejercicio.
+4
+
+--- Página 5 ---
+
+
+• Inteligencia Artificial: se aplicarán modelos de aprendizaje automático para
+personalizar las rutinas de ejercicio y mejorar la interacción con el usuario.
+• Interacción humano-computadora: se diseñarán interfaces tanto gráficas como
+auditivas (por voz) para facilitar el uso del sistema por parte del usuario final,
+considerando principios de accesibilidad y facilidad de uso.
+• Aplicaciones en el área de Internet de las Cosas (IoT): mediante conectividad entre
+el espejo y una aplicación móvil que permita sincronización de datos, seguimiento
+del rendimiento y configuración remota.
+La combinación de estas áreas proporciona el marco técnico necesario para el desarrollo
+del proyecto y asegura que su implementación está alineada con las competencias
+profesionales adquiridas a lo largo de la carrera.
+Descripción del proyecto:
+a. Justificación y definición del problema
+i. Contexto del problema o necesidad
+En los últimos años, la promoción del bienestar integral —que abarca tanto la salud física
+como mental— ha cobrado especial importancia en las rutinas diarias de las personas. Sin
+embargo, el ritmo de vida actual, las jornadas laborales extensas, el tráfico urbano y el costo
+de servicios especializados dificultan que muchas personas puedan acceder de manera
+constante a actividades físicas guiadas o programas de relajación estructurados.
+Actualmente, las soluciones más comunes para el entrenamiento en casa incluyen
+aplicaciones móviles, videos pregrabados y plataformas de suscripción que ofrecen rutinas
+de ejercicio y meditación. Estas herramientas, si bien accesibles, presentan limitaciones
+importantes: carecen de retroalimentación personalizada, no corrigen errores de postura,
+no se adaptan dinámicamente al estado físico del usuario, y en la mayoría de los casos,
+dependen exclusivamente de la autogestión del usuario sin elementos motivacionales
+activos.
+En cuanto a normativas, no existe una regulación local específica para dispositivos de
+ejercicio doméstico inteligente. Sin embargo, el desarrollo de este tipo de tecnologías debe
+considerar criterios de seguridad en el uso de sensores biométricos, privacidad en la
+captura de imágenes y facilidad de uso para públicos diversos. En términos técnicos, la
+tendencia hacia los dispositivos embebidos de bajo consumo energético y el
+5
+
+--- Página 6 ---
+
+
+procesamiento local de datos plantea una oportunidad para soluciones funcionales sin
+depender de grandes infraestructuras.
+ii. Justificación de la necesidad
+La necesidad de contar con una herramienta que permita a las personas ejercitarse,
+monitorear su estado físico y mejorar su bienestar mental desde casa es clara y creciente.
+Existen segmentos poblacionales que no pueden asistir con regularidad a un gimnasio o
+contratar un entrenador personal, ya sea por razones económicas, de tiempo o de
+preferencia por la privacidad. Por ello, resulta fundamental ofrecer alternativas tecnológicas
+que no solo sean accesibles, sino también interactivas, personalizadas y motivadoras.
+Desde la perspectiva de innovación, este proyecto representa una mejora significativa
+frente a las soluciones pasivas que dominan actualmente el mercado, al integrar
+retroalimentación en tiempo real, personalización mediante inteligencia artificial, control
+por voz y monitoreo fisiológico. Su desarrollo tiene un alto potencial de impacto, ya que
+aborda una necesidad cotidiana con una solución tecnológicamente viable para entornos
+domésticos.
+Desde el punto de vista académico y profesional, el desarrollo de este dispositivo permite
+aplicar de manera integral conocimientos en sistemas empotrados, visión por
+computadora, aprendizaje automático y diseño de interfaces, lo que lo convierte en una
+oportunidad formativa valiosa para un estudiante de Ingeniería en Computadores. Además,
+puede sentar las bases para futuras mejoras o adaptaciones hacia otros ámbitos como la
+rehabilitación física, la educación física en línea o el entrenamiento adaptativo para adultos
+mayores.
+Según diversos estudios sobre análisis de postura con sensores (Yang et al., 2020; Tao et al.,
+2012), el monitoreo preciso del cuerpo mediante tecnologías portables permite detectar
+desviaciones que podrían derivar en lesiones si no se corrigen oportunamente. Esta
+capacidad de corrección personalizada se convierte en un diferenciador clave del sistema
+propuesto.
+iii. Enunciado del problema
+¿Cómo ofrecer una solución tecnológica que permita a las personas ejercitarse desde
+casa con orientación adaptativa y personalizada, considerando las limitaciones de acceso
+a entrenadores presenciales, el tiempo disponible y la necesidad de mantener una postura
+corporal adecuada durante la actividad física?
+6
+
+--- Página 7 ---
+
+
+b. Especificación de objetivos
+Objetivo General:
+Desarrollar un sistema embebido tipo espejo inteligente que permita al usuario realizar
+rutinas de ejercicio desde su hogar con retroalimentación personalizada, mediante el
+análisis de postura, interacción por voz y monitoreo de datos fisiológicos provenientes de
+un reloj inteligente, utilizando visión por computadora, tecnologías de conectividad y una
+aplicación complementaria móvil.
+Objetivos específicos:
+• Diseñar un módulo de análisis de postura para detectar en tiempo real la posición
+corporal del usuario, con el fin de brindar correcciones visuales durante la ejecución
+de ejercicios, utilizando algoritmos de visión por computadora e inteligencia artificial
+entrenados con conjuntos de datos de poses humanas.
+• Integrar una fuente externa de datos fisiológicos, como un reloj inteligente comercial,
+para adaptar dinámicamente la intensidad de las rutinas físicas propuestas por el
+sistema, mediante el uso de APIs o protocolos de comunicación compatibles con
+dispositivos como Fitbit, Mi Band o similares.
+• Desarrollar una interfaz de entrenador virtual que genere y reproduzca rutinas de
+ejercicio personalizadas, para guiar al usuario de forma progresiva y adaptada a sus
+objetivos, utilizando los datos recolectados del análisis de postura y del reloj
+inteligente.
+• Implementar un sistema de reconocimiento de voz que permita controlar el
+dispositivo sin contacto físico, con el objetivo de facilitar la interacción durante el
+entrenamiento, utilizando bibliotecas compatibles con hardware embebido como
+Vosk o Google Speech API.
+• Construir una aplicación móvil complementaria que visualice el progreso del
+usuario, gestione la configuración del sistema y aplique técnicas de gamificación,
+para fomentar la adherencia a las rutinas y la motivación constante, empleando
+herramientas de desarrollo multiplataforma como Flutter o React Native.
+c. Impactos del proyecto y sus resultados esperados
+El desarrollo del espejo interactivo de bienestar y ejercicio personalizado tiene el potencial
+de generar impactos positivos en diversas dimensiones, tanto técnicas como sociales y
+7
+
+--- Página 8 ---
+
+
+organizacionales. A continuación, se detallan los principales efectos esperados según
+diferentes perspectivas:
+Impacto sobre stakeholders:
+• Usuarios finales: obtendrán una herramienta accesible para ejercitarse desde casa,
+con guía personalizada y adaptativa sin depender de un entrenador físico. Esto puede
+mejorar su calidad de vida, salud física y bienestar emocional.
+• Comunidad académica: el proyecto servirá como caso práctico de aplicación de
+conocimientos en sistemas embebidos, visión por computadora e inteligencia
+artificial. Puede ser replicado o expandido por otros estudiantes o grupos de
+investigación.
+• Fabricantes de tecnología: al usar dispositivos ya existentes como fuente de datos
+(relojes inteligentes), el proyecto demuestra cómo extender el valor de estos
+productos mediante nuevas integraciones.
+Impacto Ambiental:
+• Reducción de desplazamientos: al facilitar el ejercicio en casa, se reduce la
+necesidad de movilizarse hacia gimnasios o centros de salud, lo que puede disminuir
+la huella de carbono del usuario.
+• Uso eficiente de recursos: al aprovechar plataformas embebidas de bajo consumo
+energético y dispositivos ya existentes, se minimiza el impacto ambiental en
+comparación con soluciones de alto consumo energético o que requieren
+fabricación especializada.
+Impacto Económico:
+• Accesibilidad: el uso de componentes de bajo costo y tecnologías ya disponibles
+(como Raspberry Pi y relojes inteligentes comerciales) permite ofrecer una solución
+más económica que el entrenamiento presencial o el desarrollo de hardware
+biométrico propio.
+• Ahorro para el usuario: al eliminar costos recurrentes de gimnasio o entrenador, el
+dispositivo puede representar una inversión única con beneficios sostenibles en el
+tiempo.
+Impacto Técnico:
+• Integración tecnológica: el proyecto representa un reto técnico de mediana
+complejidad que permite demostrar habilidades en diseño embebido, programación
+8
+
+--- Página 9 ---
+
+
+de interfaces, procesamiento de imágenes, comunicación con dispositivos externos
+y desarrollo móvil.
+• Escalabilidad: la arquitectura modular permite futuras mejoras como integración
+con servicios en la nube, mayor personalización o incorporación de ejercicios para
+públicos específicos.
+Impacto Social:
+• Promoción de la salud preventiva: el dispositivo incentiva hábitos saludables, lo cual
+puede contribuir a reducir problemas relacionados con el sedentarismo o el estrés.
+• Inclusión: al ser una solución que puede adaptarse a diferentes horarios, niveles de
+experiencia y espacios reducidos, se vuelve accesible para una amplia gama de
+usuarios, incluidos adultos mayores o personas con restricciones de tiempo.
+Impacto Organizacional:
+• Aplicabilidad en instituciones: en el futuro, el dispositivo podría adaptarse a
+contextos como centros de rehabilitación, empresas con programas de bienestar
+laboral, o instituciones educativas que promuevan el ejercicio físico en línea.
+• Modelo de referencia para TFGs: el proyecto puede servir como ejemplo para otros
+estudiantes que deseen desarrollar productos funcionales y con aplicación real a
+partir de conocimientos adquiridos en la carrera.
+Impacto Ético:
+• Privacidad y uso de datos: se contempla desde el diseño la protección de la
+información capturada, especialmente imágenes o datos fisiológicos. El
+procesamiento será local, y el usuario podrá controlar qué se guarda o transmite.
+• Uso responsable de IA: los algoritmos utilizados estarán orientados exclusivamente
+al bienestar del usuario y no incluirán elementos de juicio o discriminación basada
+en características físicas.
+• La privacidad del usuario será considerada como se recomienda en estudios como
+Motti y Caine (2015), en donde se enfatiza el diseño centrado en el control del usuario
+sobre sus datos, especialmente en dispositivos portables o embebidos.
+Resultados esperados
+• Desarrollo funcional de un espejo inteligente con análisis de postura en tiempo real.
+9
+
+--- Página 10 ---
+
+
+• Integración exitosa con un reloj inteligente comercial para obtener datos fisiológicos.
+• Interfaz de entrenador virtual con rutinas personalizadas.
+• Sistema de control por voz operativo y eficaz.
+• Aplicación móvil conectada para seguimiento y motivación del usuario.
+• Validación del sistema con usuarios en condiciones controladas.
+d. Supuestos y limitaciones
+Supuestos:
+Los siguientes aspectos se consideran como condiciones asumidas para el desarrollo
+adecuado del proyecto:
+• Disponibilidad de equipo base: se asume que el estudiante contará con una
+plataforma de procesamiento embebido como una Raspberry Pi 4 o dispositivo
+similar, así como una cámara compatible y pantalla para integrar el sistema.
+• Acceso a un reloj inteligente comercial: se presupone el uso de un dispositivo
+como un Mi Band, Fitbit o smartwatch similar que permita acceso a métricas básicas
+mediante API o sincronización de datos.
+• Disponibilidad de conectividad local (Wi-Fi o Bluetooth): se da por hecho que el
+entorno de uso tendrá acceso a conexión inalámbrica para la comunicación entre el
+espejo y el reloj, así como con la aplicación móvil.
+• Acceso a bibliotecas y herramientas de software: se asume que las tecnologías
+necesarias para el desarrollo del sistema (OpenCV, TensorFlow, Vosk, Flutter, etc.)
+están disponibles de forma gratuita y compatible con el entorno de trabajo.
+• Acompañamiento académico: se parte de que el estudiante contará con el
+seguimiento de un profesor guía y acceso a recursos institucionales como
+laboratorios o asesoría técnica básica.
+Validación externa de posturas: se prevé contar con la colaboración de un estudiante
+avanzado o profesional del área de Ciencias del Movimiento Humano o Fisioterapia para
+validar la precisión del análisis de postura en condiciones controladas.
+Adquisición planificada de componentes: se tiene previsto adquirir todos los
+componentes críticos como la Raspberry Pi, cámara compatible y reloj inteligente
+comercial antes de iniciar la fase de integración del sistema. Se considera la compra
+10
+
+--- Página 11 ---
+
+
+directa por parte del estudiante, con respaldo de laboratorios del TEC si fuera necesario,
+para evitar atrasos en el cronograma.
+Limitaciones:
+Existen factores que podrían restringir el alcance del proyecto y deben ser considerados en
+la planificación:
+• Tiempo limitado: el TFG está diseñado para ser completado en un semestre, lo que
+condiciona la profundidad del desarrollo, las pruebas con usuarios y el refinamiento
+de funcionalidades avanzadas.
+• Acceso parcial a dispositivos comerciales: la integración con un reloj inteligente
+estará condicionada por la disponibilidad de APIs abiertas o acceso a datos
+exportables. Algunos fabricantes restringen la interacción directa con sus
+dispositivos.
+• Pruebas controladas: el sistema podrá ser probado en un entorno simulado o con
+usuarios voluntarios en un espacio definido, pero no se realizarán pruebas clínicas
+ni se validará con poblaciones específicas (como adultos mayores o personas con
+limitaciones físicas).
+• Limitaciones de procesamiento embebido: se debe considerar que plataformas
+como la Raspberry Pi tienen recursos limitados para ejecutar tareas de
+procesamiento en tiempo real, lo que podría afectar la fluidez de la experiencia.
+• Propiedad intelectual de terceros: se utilizarán herramientas, bibliotecas y
+frameworks desarrollados por terceros bajo licencias públicas. No se desarrollarán
+desde cero modelos de IA complejos ni sensores especializados.
+e. Análisis de riesgos
+El desarrollo del espejo interactivo implica la integración de múltiples tecnologías en un
+sistema embebido, lo cual conlleva diversos riesgos técnicos, logísticos y operativos. A
+continuación, se detallan los principales escenarios de riesgo y las estrategias propuestas
+para su mitigación:
+11
+
+--- Página 12 ---
+
+
+Escenario de riesgo Acciones de mitigación
+Seleccionar un dispositivo con API
+Dificultad para integrar el reloj
+documentada y abierta (ej. Mi Band o Fitbit
+inteligente por restricciones en la API o
+básico); optar por sincronización indirecta vía
+sincronización
+aplicación si es necesario.
+Optimizar modelos de análisis (ej. MediaPipe en
+Limitaciones de rendimiento en la
+lugar de redes neuronales pesadas); reducir
+plataforma embebida al ejecutar visión
+resolución de entrada; priorizar procesamiento
+por computadora
+local simple.
+Problemas de reconocimiento de voz en Usar comandos simples y cortos; implementar
+ambientes ruidosos o con hardware confirmaciones visuales o sonoras para evitar
+limitado ambigüedades.
+Realizar inventario y adquisición de
+Falta de disponibilidad de equipos o
+componentes críticos al inicio del proyecto;
+componentes para integrar el prototipo
+considerar alternativas compatibles.
+Retrasos en el cronograma por tareas Establecer un cronograma flexible con
+interdependientes o dificultades márgenes de seguridad; dividir entregables por
+técnicas inesperadas módulos independientes.
+Limitar el alcance de la app a funcionalidades
+Dificultad en la implementación de la
+esenciales (visualización de progreso,
+aplicación móvil y sincronización con el
+configuración básica); priorizar estabilidad
+sistema
+sobre estética.
+Falta de conocimientos especializados Establecer colaboración con expertos de
+en biomecánica para validar los carreras afines para observación directa,
+resultados del análisis de postura análisis comparativo y retroalimentación
+técnica sobre la ejecución postural detectada
+por el sistema.
+No disponibilidad de componentes Tener definidos modelos alternativos
+como Raspberry Pi, cámara o reloj compatibles y realizar adquisición anticipada al
+inteligente menos un mes antes del inicio de la fase de
+integración.
+Propuesta metodológica:
+a. Tipificación del trabajo a realizar
+Este Trabajo Final de Graduación se clasifica como el desarrollo de un nuevo producto con
+enfoque de innovación aplicada. Consiste en la construcción de un prototipo funcional
+de un espejo inteligente, que integra tecnologías como visión por computadora, sistemas
+embebidos, control por voz y conectividad con un reloj inteligente para ofrecer rutinas de
+ejercicio personalizadas.
+12
+
+--- Página 13 ---
+
+
+El proyecto se enmarca en una investigación teórico-práctica, ya que combina
+fundamentos académicos con la implementación de un sistema real, viable y orientado al
+uso cotidiano en el hogar.
+b. Descripción general del proceso por realizar
+El desarrollo del espejo interactivo se llevará a cabo mediante una estrategia modular y
+secuencial que permita abordar cada uno de los objetivos específicos de forma ordenada y
+factible dentro del tiempo disponible. El proceso se divide en las siguientes etapas
+principales:
+1. Investigación preliminar y análisis de requisitos
+o Revisión del estado del arte.
+o Selección de tecnologías (plataforma embebida, cámara, reloj inteligente,
+APIs de voz, frameworks).
+o Definición de funcionalidades mínimas viables (MVP).
+2. Diseño e integración del sistema embebido
+o Montaje del espejo físico y la cámara.
+o Configuración del entorno de desarrollo embebido (ej. Raspberry Pi).
+o Diseño de arquitectura de software y comunicación entre módulos.
+3. Implementación del análisis de postura
+o Integración de la cámara con modelos de visión por computadora (MediaPipe
+u OpenPose).
+o Detección y visualización en tiempo real de la postura del usuario.
+4. Sincronización con reloj inteligente
+o Pruebas de conexión con un dispositivo comercial (Fitbit, Mi Band, etc.).
+o Lectura de ritmo cardíaco y métricas disponibles mediante API o app.
+o Uso de datos fisiológicos para modificar la dificultad del entrenamiento.
+5. Desarrollo del entrenador virtual y control por voz
+13
+
+--- Página 14 ---
+
+
+o Lógica para generar y presentar rutinas adaptadas.
+o Integración de comandos de voz mediante Vosk o Google Speech API.
+6. Diseño e implementación de la aplicación móvil
+o Aplicación multiplataforma con funciones de monitoreo, gamificación y
+configuración.
+o Sincronización con el sistema embebido.
+7. Pruebas funcionales y ajustes
+o Validación de los módulos.
+o Pruebas internas en un entorno controlado.
+o Ajustes de rendimiento y experiencia de usuario.
+8. Documentación técnica y entrega final
+o Redacción del informe del TFG.
+o Documentación del código y manual de usuario.
+Figura 1: Esquema del proceso general del proyecto
+14
+
+--- Página 15 ---
+
+
+C. Tabla de relación entre objetivos del proyecto y proceso por realizar
+Objetivo Principales Entregables Técnicas o Estrategias de
+específico actividades herramientas verificación y
+validación
+Diseñar un módulo - Integrar cámara al Módulo de MediaPipe, Pruebas con
+de análisis de sistema embebido- análisis de OpenCV, distintos usuarios y
+postura para Implementar postura Python, poses;
+detectar en tiempo modelo de visión funcional Raspberry Pi comparación con
+real la posición por computadora- referencias visuales
+corporal del Calibrar la
+usuario. detección de poses
+Integrar una fuente - Seleccionar Sistema de APIs de Fitbit, Verificación con
+externa de datos dispositivo lectura y uso Mi Band o datos simulados y
+fisiológicos, como compatible- Leer de datos similar; reales;
+un reloj inteligente datos de ritmo biométricos Bluetooth; comparación con
+comercial. cardíaco mediante Python valores mostrados
+API o app- por el reloj
+Implementar lógica
+de adaptación de
+rutina
+Desarrollar una - Diseñar lógica de Módulo de Python, Tkinter Pruebas
+interfaz de rutinas- entrenador o librería funcionales con
+entrenador virtual Implementar virtual equivalente, rutinas simples;
+que genere y interfaz gráfica integrado al JSON validación de flujo
+reproduzca rutinas básica en el espejo- sistema de navegación
+de ejercicio Programar cambios embebido
+personalizadas. de rutina
+automáticos
+Implementar un - Integrar micrófono Módulo de Vosk, Google Pruebas en
+sistema de al sistema- control por Speech API, ambientes con
+reconocimiento de Programar voz Python distintos niveles de
+voz que permita comandos básicos- funcional ruido; pruebas de
+controlar el Vincular acciones a precisión de
+dispositivo sin comandos comandos
+contacto físico. reconocidos
+Construir una - Diseñar interfaz de Aplicación Flutter o React Pruebas
+aplicación móvil usuario- móvil Native, funcionales de
+complementaria Sincronizar datos funcional en Firebase o sincronización y
+que visualice el con el espejo- Android o SQLite almacenamiento;
+progreso del Implementar lógica IOS revisión de interfaz
+usuario y aplique de logros o metas por usuarios
+gamificación.
+15
+
+--- Página 16 ---
+
+
+d. Cronograma propuesto para el proyecto
+El desarrollo del proyecto se estructura sobre una planificación semestral, con una
+distribución clara de tareas organizadas por etapas, entregables y dependencias técnicas.
+Se aplican niveles de desglose que permiten identificar cada fase de trabajo de manera
+precisa, lo que facilita el control de avance y la verificación de cumplimiento en relación con
+los objetivos específicos planteados.
+A continuación, se detallan las labores planificadas, organizadas en bloques de trabajo con
+nomenclatura jerarquizada para mayor claridad:
+Fase 1: Análisis preliminar y planificación del sistema (Julio 2025)
+• 1.1 Revisión del estado del arte: análisis de soluciones tecnológicas similares
+existentes.
+• 1.2 Definición de requerimientos funcionales y no funcionales.
+• 1.3 Selección y validación de tecnologías a utilizar: plataformas embebidas,
+herramientas de visión por computadora, compatibilidad con reloj inteligente,
+bibliotecas de reconocimiento de voz, entre otras.
+• Entregable: Documento de especificaciones técnicas y arquitectura preliminar del
+sistema.
+Fase 2: Diseño e integración del sistema embebido (Agosto 2025)
+• 2.1 Montaje físico del prototipo (estructura del espejo, pantalla, cámara).
+• 2.2 Instalación y configuración del entorno de desarrollo sobre el sistema
+embebido.
+• 2.3 Diseño modular del sistema y estructura de carpetas del software.
+• Entregable: Sistema embebido base con estructura de software y hardware definida.
+Fase 3: Implementación de los módulos funcionales (Septiembre – Octubre 2025)
+• 3.1 Módulo de análisis de postura
+o Implementación del modelo de visión por computadora.
+o Integración de cámara y calibración del sistema.
+• 3.2 Módulo de integración con reloj inteligente
+16
+
+--- Página 17 ---
+
+
+o Selección del dispositivo biométrico.
+o Lectura de datos fisiológicos y vinculación con el sistema embebido.
+• 3.3 Módulo de entrenador virtual y control por voz
+o Programación de rutinas adaptativas.
+o Implementación del motor de comandos de voz.
+• Entregables: Módulos funcionales individuales (postura, biometría, voz) validados
+en entorno local.
+Fase 4: Desarrollo de aplicación móvil complementaria (Segunda mitad de octubre
+2025)
+• 4.1 Diseño de la interfaz de usuario móvil.
+• 4.2 Sincronización de datos con el sistema embebido.
+• 4.3 Implementación de lógica de seguimiento, gamificación y configuración.
+• Entregable: Aplicación funcional conectada al sistema embebido.
+Fase 5: Validación, pruebas funcionales e integración del sistema (Noviembre 2025)
+• 5.1 Pruebas unitarias por módulo.
+• 5.2 Pruebas de integración y funcionamiento global del sistema.
+• 5.3 Ajustes de rendimiento, usabilidad y estabilidad.
+• Entregable: Prototipo funcional completo, con validación en entorno simulado.
+Fase 6: Documentación y cierre del proyecto (Finales de noviembre – inicios de
+diciembre 2025)
+• 6.1 Redacción del informe final del Trabajo Final de Graduación.
+• 6.2 Elaboración de documentación técnica del sistema.
+• 6.3 Preparación de presentación oral y anexos requeridos.
+• Entregables: Documento final del TFG, manual técnico y presentación oficial.
+17
+
+--- Página 18 ---
+
+
+Figura 2: Cronograma de actividades del proyecto (Julio - Diciembre 2025).
+18
+
+--- Página 19 ---
+
+
+Apéndice
+Ficha de contactos del proyecto:
+Datos del estudiante
+Nombre Axel Josué Cordero Martínez
+Correo electrónico axeljcm@estudiantec.cr
+Teléfonos +506 6483 9332
+Datos del proyecto
+Nombre Espejo Interactivo de Bienestar y Ejercicio Personalizado con
+Inteligencia Artificial
+Breve descripción Desarrollo de un sistema embebido tipo espejo inteligente que permita
+guiar rutinas de ejercicio en el hogar, mediante análisis de postura con
+visión por computadora, control por voz y monitoreo fisiológico en
+tiempo real a través de un reloj inteligente.
+Fecha de Inicio Julio 2025
+Datos de la empresa u organización
+Nombre Instituto Tecnológico de Costa Rica
+Nombre contacto Ing. Marco Antonio Hernández Vásquez, cédula 303140331
+Correo electrónico Marco.hernandez@itcr.ac.cr
+Teléfonos Tel. 8991-3684
+Referencias bibliográficas:
+1. World Health Organization. (2020). Guidelines on physical activity and sedentary
+behaviour. World Health Organization.
+https://www.who.int/publications/i/item/9789240015128
+2. Chen, K., & Koskela, M. (2021). Real-time human pose estimation on edge devices
+using MediaPipe. Sensors, 21(11), 3859. https://doi.org/10.3390/s21113859
+3. Yang, Y., Yao, Q., & Dong, X. (2020). Wearable sensors for posture and movement
+tracking: A review. IEEE Reviews in Biomedical Engineering, 13, 169–180.
+https://doi.org/10.1109/RBME.2019.2939641
+4. Google Developers. (2024). MediaPipe Pose.
+https://developers.google.com/mediapipe/solutions/pose
+19
+
+--- Página 20 ---
+
+
+5. Tao, W., Liu, T., Zheng, R., & Feng, H. (2012). Gait analysis using wearable sensors.
+Sensors, 12(2), 2255–2283. https://doi.org/10.3390/s120202255
+6. Dias, D., & Cunha, J. P. S. (2018). Wearable health devices—Vital sign monitoring,
+systems and technologies. Sensors, 18(8), 2414. https://doi.org/10.3390/s18082414
+7. Fleck, S. J., & Kraemer, W. J. (2014). Designing resistance training programs (4th ed.).
+Human Kinetics.
+8. Márquez, F. P. G., Pino-Mejías, R., Valdivieso-Sarabia, R., & García-González, J. M.
+(2020). Big data and artificial intelligence in the digital transformation of health care.
+Healthcare, 8(3), 251. https://doi.org/10.3390/healthcare8030251
+9. Morrison, L. G., Hargood, C., Pejovic, V., Geraghty, A. W. A., Lloyd, S., Goodman, N.,
+... & Yardley, L. (2017). The effect of timing and frequency of push notifications on
+usage of a smartphone-based stress management intervention: An exploratory trial.
+PLOS ONE, 12(1), e0169162. https://doi.org/10.1371/journal.pone.0169162
+10. Amft, O., & Tröster, G. (2008). Recognition of dietary activity events using on-body
+sensors. Artificial Intelligence in Medicine, 42(2), 121–136.
+https://doi.org/10.1016/j.artmed.2007.11.007
+11. Motti, V. G., & Caine, K. (2015). Users’ privacy concerns about wearables. In
+Financial Cryptography and Data Security (pp. 231–244). Springer.
+https://doi.org/10.1007/978-3-662-48051-9_18
+12. Yang, Y., Yao, Q., & Dong, X. (2020). Wearable sensors for posture and movement
+tracking: A review. IEEE Reviews in Biomedical Engineering, 13, 169–180.
+https://doi.org/10.1109/RBME.2019.2939641
+13. Tao, W., Liu, T., Zheng, R., & Feng, H. (2012). Gait analysis using wearable sensors.
+Sensors, 12(2), 2255–2283. https://doi.org/10.3390/s120202255
+20
