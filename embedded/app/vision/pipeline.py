@@ -42,5 +42,10 @@ class PoseEstimator:
         fps = 1.0 / dt
         logger.debug("vision fps={}", fps)
         joints = self._dummy_joints()
-        feedback = "Mantén la espalda recta y alinea los hombros."
+        # Simple heuristic: shoulder alignment
+        ls = next((j for j in joints if j.name == "left_shoulder"), None)
+        rs = next((j for j in joints if j.name == "right_shoulder"), None)
+        feedback = "Postura OK"
+        if ls and rs and abs(ls.y - rs.y) > 0.05:
+            feedback = "Ajusta los hombros al mismo nivel"
         return PostureOutput(fps=fps, joints=joints, feedback=feedback)

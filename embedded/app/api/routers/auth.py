@@ -39,7 +39,7 @@ def fitbit_callback(code: str) -> dict:
     token_url = "https://api.fitbit.com/oauth2/token"
     auth_hdr = base64.b64encode(f"{s.fitbit_client_id}:{s.fitbit_client_secret}".encode()).decode()
     data = {
-        "clientId": s.fitbit_client_id,
+        "client_id": s.fitbit_client_id,
         "grant_type": "authorization_code",
         "redirect_uri": s.fitbit_redirect_uri,
         "code": code,
@@ -67,4 +67,43 @@ def fitbit_callback(code: str) -> dict:
         return {"success": True}
     except Exception as exc:  # pragma: no cover
         logger.error("Fitbit callback error: {}", exc)
+        return {"success": False, "error": str(exc)}
+
+
+@router.post("/auth/fitbit/refresh")
+def fitbit_refresh() -> dict:
+    """Refresh tokens using the stored refresh_token."""
+    s = get_settings()
+    tokens = TokenStore().load()
+    if not tokens:
+        return {"success": False, "error": "no_tokens"}
+    token_url = "https://api.fitbit.com/oauth2/token"
+    auth_hdr = base64.b64encode(f"{s.fitbit_client_id}:{s.fitbit_client_secret}".encode()).decode()
+    data = {
+        "grant_type": "refresh_token",
+        "refresh_token": tokens.refresh_token,
+    }
+    try:
+        r = requests.post(
+            token_url,
+            headers={
+                "Authorization": f"Basic {auth_hdr}",
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            data=data,
+            timeout=10,
+        )
+        r.raise_for_status()
+        payload = r.json()
+        new_tokens = FitbitTokens(
+            access_token=payload.get("access_token"),
+            refresh_token=payload.get("refresh_token"),
+            token_type=payload.get("token_type", "Bearer"),
+            expires_in=payload.get("expires_in", 28800),
+        )
+        TokenStore().save(new_tokens)
+        logger.info("Fitbit tokens refreshed")
+        return {"success": True}
+    except Exception as exc:  # pragma: no cover
+        logger.error("Fitbit refresh error: {}", exc)
         return {"success": False, "error": str(exc)}

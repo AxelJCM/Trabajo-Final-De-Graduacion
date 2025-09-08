@@ -4,7 +4,9 @@
     "jsx": "react-jsx",
     "allowJs": true,
     "strict": true,
-    "types": ["jest", "react", "react-native"]
+    "types": ["jest", "react", "react-native"],
+    "lib": ["ES2019", "DOM"],
+    "skipLibCheck": true
   },
   "include": ["src", "tests", "index.js"]
 }
