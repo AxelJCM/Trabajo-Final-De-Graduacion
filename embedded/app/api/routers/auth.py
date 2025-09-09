@@ -8,13 +8,16 @@ import base64
 import urllib.parse
 
 import requests
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, Response, Depends
 from loguru import logger
 
 from app.core.config import get_settings
-from app.biometrics.token_store import TokenStore, FitbitTokens
+from sqlalchemy.orm import Session
+from app.core.db import get_db, Base, engine
+from app.core.dal import save_tokens, get_tokens
 
 router = APIRouter()
+Base.metadata.create_all(bind=engine)
 
 
 @router.get("/auth/fitbit/login")
@@ -34,7 +37,7 @@ def fitbit_login() -> Response:
 
 
 @router.get("/auth/fitbit/callback")
-def fitbit_callback(code: str) -> dict:
+def fitbit_callback(code: str, db: Session = Depends(get_db)) -> dict:
     s = get_settings()
     token_url = "https://api.fitbit.com/oauth2/token"
     auth_hdr = base64.b64encode(f"{s.fitbit_client_id}:{s.fitbit_client_secret}".encode()).decode()
@@ -56,13 +59,7 @@ def fitbit_callback(code: str) -> dict:
         )
         r.raise_for_status()
         payload = r.json()
-        tokens = FitbitTokens(
-            access_token=payload.get("access_token"),
-            refresh_token=payload.get("refresh_token"),
-            token_type=payload.get("token_type", "Bearer"),
-            expires_in=payload.get("expires_in", 28800),
-        )
-        TokenStore().save(tokens)
+        save_tokens(db, payload.get("access_token"), payload.get("refresh_token"), payload.get("expires_in", 28800))
         logger.info("Fitbit tokens saved")
         return {"success": True}
     except Exception as exc:  # pragma: no cover
@@ -71,10 +68,10 @@ def fitbit_callback(code: str) -> dict:
 
 
 @router.post("/auth/fitbit/refresh")
-def fitbit_refresh() -> dict:
+def fitbit_refresh(db: Session = Depends(get_db)) -> dict:
     """Refresh tokens using the stored refresh_token."""
     s = get_settings()
-    tokens = TokenStore().load()
+    tokens = get_tokens(db)
     if not tokens:
         return {"success": False, "error": "no_tokens"}
     token_url = "https://api.fitbit.com/oauth2/token"
@@ -95,13 +92,7 @@ def fitbit_refresh() -> dict:
         )
         r.raise_for_status()
         payload = r.json()
-        new_tokens = FitbitTokens(
-            access_token=payload.get("access_token"),
-            refresh_token=payload.get("refresh_token"),
-            token_type=payload.get("token_type", "Bearer"),
-            expires_in=payload.get("expires_in", 28800),
-        )
-        TokenStore().save(new_tokens)
+        save_tokens(db, payload.get("access_token"), payload.get("refresh_token"), payload.get("expires_in", 28800))
         logger.info("Fitbit tokens refreshed")
         return {"success": True}
     except Exception as exc:  # pragma: no cover

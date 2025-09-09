@@ -49,3 +49,19 @@ class PoseEstimator:
         if ls and rs and abs(ls.y - rs.y) > 0.05:
             feedback = "Ajusta los hombros al mismo nivel"
         return PostureOutput(fps=fps, joints=joints, feedback=feedback)
+
+    def snapshot(self) -> PostureOutput:
+        """Return a posture analysis snapshot that works without a camera.
+
+        Falls back to deterministic joints (mock) and fps≈0 when camera/images are unavailable.
+        """
+        try:
+            # Placeholder: if cv2 and a sample image exist, load and analyze; else mock
+            sample_path = __file__.replace("pipeline.py", "../../assets/sample_pose.jpg")
+            # Not actually used yet—kept for future extension
+        except Exception:
+            pass
+        out = self.analyze_frame()
+        # Force fps ~0 for snapshot semantics
+        out.fps = 0.0
+        return out

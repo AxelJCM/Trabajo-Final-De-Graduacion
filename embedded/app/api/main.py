@@ -25,12 +25,13 @@ settings = get_settings()
 app = FastAPI(title=settings.app_name)
 
 # CORS for mobile app dev
+s = get_settings()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=s.exposed_origins,
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["*"]
 )
 
 

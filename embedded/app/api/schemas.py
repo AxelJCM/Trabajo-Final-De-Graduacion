@@ -55,10 +55,14 @@ class RoutineOutput(BaseModel):
 
 
 class ConfigInput(BaseModel):
-    key: str
-    value: str | int | float | bool | None
+    language: Optional[str] = None
+    intensity: Optional[str] = None
+    units: Optional[str] = None
+    tz: Optional[str] = None
 
 
 class ConfigOutput(BaseModel):
-    key: str
-    value: str | int | float | bool | None
+    language: str
+    intensity: str
+    units: str
+    tz: str

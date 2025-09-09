@@ -40,6 +40,16 @@ class Settings(BaseModel):
 
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
 
+    # Security & CORS
+    api_key: str | None = os.getenv("API_KEY")
+    exposed_origins: list[str] = (
+        os.getenv("EXPOSED_ORIGINS", "*").split(",") if os.getenv("EXPOSED_ORIGINS") else ["*"]
+    )
+
+    # Biometrics / scheduling
+    fitbit_poll_interval: int = int(os.getenv("FITBIT_POLL_INTERVAL", "15"))
+    timezone: str = os.getenv("TIMEZONE", "America/Costa_Rica")
+
 
 @lru_cache
 def get_settings() -> Settings:
