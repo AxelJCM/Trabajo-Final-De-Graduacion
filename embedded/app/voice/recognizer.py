@@ -24,6 +24,31 @@ class VoiceRecognizer:
             return "iniciar rutina"
         # TODO: integrate Google Speech
         return None
+
+
+def map_utterance_to_intent(utterance: str) -> Optional[str]:
+    """Map a plaintext utterance to a known intent.
+
+    Supported intents: start, pause, next, stop, volume_up, volume_down
+    """
+    if not utterance:
+        return None
+    u = utterance.strip().lower()
+    table = {
+        "start": "start",
+        "iniciar": "start",
+        "pause": "pause",
+        "pausa": "pause",
+        "next": "next",
+        "siguiente": "next",
+        "stop": "stop",
+        "detener": "stop",
+        "volume_up": "volume_up",
+        "subir volumen": "volume_up",
+        "volume_down": "volume_down",
+        "bajar volumen": "volume_down",
+    }
+    return table.get(u)
 """Voice control interface using Vosk (offline) or Google Speech API.
 
 Exposes Recognizer.listen_once() returning a command string.

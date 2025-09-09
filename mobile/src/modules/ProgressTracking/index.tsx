@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, Button } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getBiometrics, getRoutine } from '../../services/api';
 
 // ProgressTracking module shows user's progress and statistics.
@@ -15,10 +16,21 @@ export default function ProgressTracking() {
       const bio = await getBiometrics();
       setHr(bio.data?.heart_rate_bpm ?? null);
       setSteps(bio.data?.steps ?? null);
+      await AsyncStorage.setItem('last_metrics', JSON.stringify(bio.data));
       const r = await getRoutine('demo-user');
       setRoutine(r.data);
+      await AsyncStorage.setItem('last_routine', JSON.stringify(r.data));
     } catch (e: any) {
       setError(e?.message || 'Network error');
+      // Offline fallback
+      const cachedMetrics = await AsyncStorage.getItem('last_metrics');
+      if (cachedMetrics) {
+        const m = JSON.parse(cachedMetrics);
+        setHr(m?.heart_rate_bpm ?? null);
+        setSteps(m?.steps ?? null);
+      }
+      const cachedRoutine = await AsyncStorage.getItem('last_routine');
+      if (cachedRoutine) setRoutine(JSON.parse(cachedRoutine));
     }
   };
 

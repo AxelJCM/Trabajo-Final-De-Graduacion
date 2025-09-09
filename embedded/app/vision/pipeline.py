@@ -53,15 +53,36 @@ class PoseEstimator:
     def snapshot(self) -> PostureOutput:
         """Return a posture analysis snapshot that works without a camera.
 
-        Falls back to deterministic joints (mock) and fps≈0 when camera/images are unavailable.
+        If a sample image exists in embedded/assets/sample_pose.jpg and OpenCV is available,
+        load it to influence a deterministic posture; otherwise use dummy joints.
         """
-        try:
-            # Placeholder: if cv2 and a sample image exist, load and analyze; else mock
-            sample_path = __file__.replace("pipeline.py", "../../assets/sample_pose.jpg")
-            # Not actually used yet—kept for future extension
-        except Exception:
-            pass
+        # Attempt to use a deterministic sample image path
+        sample_path = __file__.replace("app\\vision\\pipeline.py", "assets/sample_pose.jpg").replace(
+            "app/vision/pipeline.py", "assets/sample_pose.jpg"
+        )
+        if cv2 is not None:
+            try:
+                img = cv2.imread(sample_path)
+                if img is not None:
+                    logger.debug("Loaded sample posture image: {}", sample_path)
+                    # For now we don't run heavy models; we just tweak joints deterministically
+                    out = self.analyze_frame()
+                    # Nudge shoulders based on image size parity
+                    h, w = img.shape[:2]
+                    delta = 0.0 if (h + w) % 2 == 0 else 0.06
+                    for j in out.joints:
+                        if j.name == "left_shoulder":
+                            j.y += delta
+                    # Recompute feedback with updated joints
+                    ls = next((j for j in out.joints if j.name == "left_shoulder"), None)
+                    rs = next((j for j in out.joints if j.name == "right_shoulder"), None)
+                    out.feedback = "Postura OK"
+                    if ls and rs and abs(ls.y - rs.y) > 0.05:
+                        out.feedback = "Ajusta los hombros al mismo nivel"
+                    out.fps = 0.0
+                    return out
+            except Exception as exc:  # pragma: no cover
+                logger.warning("Snapshot image load failed: {}", exc)
         out = self.analyze_frame()
-        # Force fps ~0 for snapshot semantics
         out.fps = 0.0
         return out

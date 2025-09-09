@@ -11,6 +11,7 @@ This module wires sub-routers from domain modules and provides a health check.
 from __future__ import annotations
 
 from fastapi import FastAPI
+from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
@@ -19,10 +20,21 @@ from app.api.routers.biometrics import router as biometrics_router
 from app.api.routers.routine import router as routine_router
 from app.api.routers.config_router import router as config_router
 from app.api.routers.auth import router as auth_router
+from app.api.routers.voice import router as voice_router
+from app.core.db import engine, Base
 
 settings = get_settings()
 
-app = FastAPI(title=settings.app_name)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: ensure DB tables exist
+    Base.metadata.create_all(bind=engine)
+    yield
+    # Shutdown: nothing for now
+
+
+app = FastAPI(title=settings.app_name, lifespan=lifespan)
 
 # CORS for mobile app dev
 s = get_settings()
@@ -48,3 +60,4 @@ app.include_router(biometrics_router, prefix="", tags=["biometrics"])
 app.include_router(routine_router, prefix="", tags=["routine"])
 app.include_router(config_router, prefix="", tags=["config"])
 app.include_router(auth_router, prefix="", tags=["auth"])
+app.include_router(voice_router, prefix="", tags=["voice"])

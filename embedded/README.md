@@ -25,5 +25,13 @@ python -m venv .venv; .\.venv\Scripts\Activate.ps1; pip install -r embedded/requ
 - POST /biometrics
 - POST /routine
 - POST /config
+- POST /voice/test
 
 All responses use { success, data, error }.
+
+## CLI fallback
+If GUI isn't available, run:
+
+```powershell
+python -m app.gui.mirror_gui --cli --base-url http://127.0.0.1:8000
+```
