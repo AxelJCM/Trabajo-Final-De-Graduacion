@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 from loguru import logger
+from dataclasses import asdict
 
 from app.api.schemas import Envelope, PostureInput, PostureOutput
 from app.vision.pipeline import PoseEstimator
@@ -23,4 +24,6 @@ async def posture_endpoint(payload: PostureInput) -> Envelope:
     """
     result: PostureOutput = pose_estimator.analyze_frame()
     logger.info("posture fps={}", result.fps)
-    return Envelope(success=True, data=result.model_dump())
+    # Support dataclass result from vision pipeline
+    data = result.model_dump() if hasattr(result, "model_dump") else asdict(result)
+    return Envelope(success=True, data=data)
