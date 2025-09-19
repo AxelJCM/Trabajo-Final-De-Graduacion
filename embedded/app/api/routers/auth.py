@@ -121,7 +121,13 @@ def fitbit_status(db: Session = Depends(get_db)) -> dict:
     tok = get_tokens(db)
     if not tok:
         return {"connected": False}
-    remaining = (tok.expires_at_utc - tok.updated_at_utc).total_seconds() if tok.expires_at_utc and tok.updated_at_utc else None
+    from datetime import datetime, timezone
+    remaining = None
+    if getattr(tok, "expires_at_utc", None):
+        try:
+            remaining = (tok.expires_at_utc - datetime.now(timezone.utc)).total_seconds()
+        except Exception:
+            remaining = None
     return {
         "connected": True,
         "provider": tok.provider,

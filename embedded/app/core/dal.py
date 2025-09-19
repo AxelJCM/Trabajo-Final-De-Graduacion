@@ -39,7 +39,27 @@ def save_user_config(db: Session, **kwargs) -> UserConfig:
 
 
 def get_tokens(db: Session) -> Optional[Token]:
-    return db.query(Token).filter(Token.id == 1).first()
+    """Return tokens if present.
+
+    Falls back to a minimal raw SELECT when legacy DBs lack new columns
+    (provider/scope/token_type/timestamps), avoiding OperationalError.
+    """
+    try:
+        return db.query(Token).filter(Token.id == 1).first()
+    except Exception:
+        try:
+            res = db.execute(
+                text("SELECT id, access_token, refresh_token, expires_at_utc FROM token WHERE id=1")
+            )
+            row = res.first()
+            if not row:
+                return None
+            # Build an in-memory Token object with basic fields
+            return Token(
+                id=row[0], access_token=row[1], refresh_token=row[2], expires_at_utc=row[3]
+            )
+        except Exception:
+            return None
 
 
 def save_tokens(
