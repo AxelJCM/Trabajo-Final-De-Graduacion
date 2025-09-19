@@ -11,8 +11,11 @@ export MODEL_COMPLEXITY=${MODEL_COMPLEXITY:-0}
 export CAMERA_WIDTH=${CAMERA_WIDTH:-640}
 export CAMERA_HEIGHT=${CAMERA_HEIGHT:-360}
 export CAMERA_FPS=${CAMERA_FPS:-15}
+export CAMERA_INDEX=${CAMERA_INDEX:-0}
 # Uncomment to force mock vision (no camera/mediapipe init)
 # export VISION_MOCK=1
+# Ensure mock is disabled by default
+unset VISION_MOCK || true
 
 # Activate the embedded venv
 if [ -f .venv/bin/activate ]; then
