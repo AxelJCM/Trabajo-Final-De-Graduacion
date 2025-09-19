@@ -14,8 +14,6 @@ except Exception:  # pragma: no cover - allow tests w/o OpenCV
 
 from loguru import logger
 
-from __future__ import annotations
-
 import math
 import os
 import time
