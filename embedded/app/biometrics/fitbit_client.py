@@ -13,7 +13,8 @@ from loguru import logger
 
 from app.core.config import get_settings
 from app.core.db import SessionLocal
-from app.core.dal import get_tokens, save_tokens
+from app.core.dal import get_tokens as dal_get_tokens, save_tokens as dal_save_tokens
+from app.core.db import SessionLocal
 from app.api.schemas import BiometricsOutput
 
 
@@ -96,7 +97,11 @@ class FitbitClient:
                         self.tz = self.settings.timezone
                         self._last_sample: Optional[Tuple[int, datetime]] = None  # (hr, ts)
                         if not access_token:
-                            t = get_tokens()
+                            db = SessionLocal()
+                            try:
+                                t = dal_get_tokens(db)
+                            finally:
+                                db.close()
                             if t:
                                 self.access_token = t.access_token
                                 self.refresh_token = t.refresh_token
@@ -193,7 +198,12 @@ class FitbitClient:
                                     self.refresh_token = body.get("refresh_token", self.refresh_token)
                                     expires_in = body.get("expires_in", 3600)
                                     self.expires_at_utc = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
-                                    save_tokens(self.access_token, self.refresh_token, self.expires_at_utc)
+                                    if self.access_token and self.refresh_token and expires_in:
+                                        db = SessionLocal()
+                                        try:
+                                            dal_save_tokens(db, self.access_token, self.refresh_token, expires_in)
+                                        finally:
+                                            db.close()
                                 else:
                                     logger.warning("Fitbit refresh failed: {} {}", r.status_code, r.text[:200])
                         except Exception as exc:
@@ -201,9 +211,13 @@ class FitbitClient:
 
                     async def polling_loop(self, stop_event: asyncio.Event):
                         interval = int(self.settings.fitbit_poll_interval)
-                        while not stop_event.is_set():
-                            try:
-                                await self.get_latest_metrics()
-                            except Exception as exc:
-                                logger.warning("Polling error: {}", exc)
-                            await asyncio.sleep(interval)
+                        try:
+                            while not stop_event.is_set():
+                                try:
+                                    await self.get_latest_metrics()
+                                except Exception as exc:
+                                    logger.warning("Polling error: {}", exc)
+                                await asyncio.sleep(interval)
+                        except asyncio.CancelledError:  # pragma: no cover
+                            logger.info("Fitbit polling task cancelled")
+                            raise

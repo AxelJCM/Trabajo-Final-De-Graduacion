@@ -27,9 +27,19 @@ class Joint(BaseModel):
     score: float = Field(ge=0.0, le=1.0, default=1.0)
 
 
+class Angles(BaseModel):
+    left_elbow: float | None = None
+    right_elbow: float | None = None
+    left_knee: float | None = None
+    right_knee: float | None = None
+    shoulder_hip_alignment: float | None = None
+
+
 class PostureOutput(BaseModel):
     fps: float
     joints: List[Joint]
+    angles: Angles
+    quality: float
     feedback: str
 
 
