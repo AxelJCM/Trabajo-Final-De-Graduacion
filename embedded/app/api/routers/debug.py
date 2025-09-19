@@ -6,22 +6,24 @@ from typing import Iterator
 from pathlib import Path
 import time
 
-from app.vision.pipeline import PoseEstimator
+from app.api.routers.posture import pose_estimator
 
 router = APIRouter()
-
-pose_estimator = PoseEstimator()
 
 
 def mjpeg_frames() -> Iterator[bytes]:
     cap = pose_estimator.cap
     import cv2  # type: ignore
+    import numpy as np  # type: ignore
     if cap is None:
-        # empty stream when no camera
+        # placeholder black frame when no camera
+        placeholder = np.zeros((360, 640, 3), dtype=np.uint8)
+        ok, buf = cv2.imencode('.jpg', placeholder)
+        jpg = buf.tobytes() if ok else b""
         while True:
             time.sleep(0.5)
             yield (b"--frame\r\n"
-                   b"Content-Type: image/jpeg\r\n\r\n" + b"" + b"\r\n")
+                   b"Content-Type: image/jpeg\r\n\r\n" + jpg + b"\r\n")
     else:
         while True:
             ok, frame = cap.read()
@@ -56,3 +58,20 @@ async def logs_tail(lines: int = 200) -> Response:
     # Return last N lines
     text = data.decode(errors="ignore").splitlines()[-lines:]
     return PlainTextResponse("\n".join(text))
+
+
+@router.get("/debug/snapshot.jpg")
+async def snapshot() -> Response:
+    import cv2  # type: ignore
+    import numpy as np  # type: ignore
+    cap = pose_estimator.cap
+    if cap is not None:
+        ok, frame = cap.read()
+        if ok:
+            ret, buf = cv2.imencode('.jpg', frame)
+            if ret:
+                return Response(content=buf.tobytes(), media_type="image/jpeg")
+    # fallback placeholder
+    img = np.zeros((360, 640, 3), dtype=np.uint8)
+    ret, buf = cv2.imencode('.jpg', img)
+    return Response(content=(buf.tobytes() if ret else b""), media_type="image/jpeg")
