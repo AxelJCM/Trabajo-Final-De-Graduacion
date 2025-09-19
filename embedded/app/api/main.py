@@ -21,7 +21,10 @@ from app.api.routers.routine import router as routine_router
 from app.api.routers.config_router import router as config_router
 from app.api.routers.auth import router as auth_router
 from app.api.routers.voice import router as voice_router
-from app.core.db import engine, Base
+from app.core.db import engine, Base, SessionLocal
+from app.core.dal import get_tokens
+import asyncio
+from app.biometrics.fitbit_client import FitbitClient
 
 settings = get_settings()
 
@@ -30,8 +33,23 @@ settings = get_settings()
 async def lifespan(app: FastAPI):
     # Startup: ensure DB tables exist
     Base.metadata.create_all(bind=engine)
+    # Start Fitbit polling if tokens exist
+    db = SessionLocal()
+    stop_event = asyncio.Event()
+    try:
+        if get_tokens(db):
+            client = FitbitClient()
+            task = asyncio.create_task(client.polling_loop(stop_event))
+            app.state._fitbit_task = task
+            app.state._fitbit_stop = stop_event
+    finally:
+        db.close()
     yield
-    # Shutdown: nothing for now
+    # Shutdown: stop polling
+    if getattr(app.state, "_fitbit_stop", None):
+        app.state._fitbit_stop.set()
+    if getattr(app.state, "_fitbit_task", None):
+        await app.state._fitbit_task
 
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)

@@ -5,6 +5,7 @@ All responses follow { success, data, error }.
 - GET /health
 - POST /posture
 - POST /biometrics
+- GET /biometrics/last
 - POST /routine
 - GET /config
 - POST /config

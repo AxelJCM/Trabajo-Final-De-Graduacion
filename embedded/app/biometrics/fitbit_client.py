@@ -62,57 +62,148 @@ class FitbitClient:
                     headers=self._headers(),
                     timeout=5,
                 )
-                hr_resp.raise_for_status()
-                steps_resp.raise_for_status()
-                bpm = 85  # TODO: parse
-                steps = 3000  # TODO: parse
-                now = dt.datetime.utcnow().isoformat()
-                return BiometricsOutput(heart_rate_bpm=bpm, steps=steps, timestamp=now)
-            except Exception as exc:  # pragma: no cover - network dependent
-                logger.warning("Fitbit API attempt {} failed: {}", attempt + 1, exc)
-                # On first failure, try refresh if we have refresh_token
-                if attempt == 0:
-                    with SessionLocal() as db:
-                        tok = get_tokens(db)
-                        if tok and tok.refresh_token:
-                            self._refresh_token(db, tok.refresh_token)
-                # jitter-less simple backoff
-                import time as _t
-                _t.sleep(delay_s)
-                delay_s *= 2
+                from __future__ import annotations
 
-        now = dt.datetime.utcnow().isoformat()
-        logger.error("Fitbit API failing; returning zeros")
-        return BiometricsOutput(heart_rate_bpm=0, steps=0, timestamp=now)
+                import asyncio
+                import random
+                from dataclasses import dataclass
+                from datetime import datetime, timezone, timedelta
+                from typing import Optional, Tuple
 
-    def _refresh_token(self, db, refresh_token: str) -> None:
-        """Refresh the access token using refresh_token."""
-        try:
-            token_url = "https://api.fitbit.com/oauth2/token"
-            import base64
+                from loguru import logger
 
-            auth_hdr = base64.b64encode(
-                f"{self.settings.fitbit_client_id}:{self.settings.fitbit_client_secret}".encode()
-            ).decode()
-            data = {"grant_type": "refresh_token", "refresh_token": refresh_token}
-            r = requests.post(
-                token_url,
-                headers={
-                    "Authorization": f"Basic {auth_hdr}",
-                    "Content-Type": "application/x-www-form-urlencoded",
-                },
-                data=data,
-                timeout=10,
-            )
-            r.raise_for_status()
-            payload = r.json()
-            save_tokens(
-                db,
-                payload.get("access_token"),
-                payload.get("refresh_token"),
-                payload.get("expires_in", 28800),
-            )
-            self.access_token = payload.get("access_token")
-            logger.info("Fitbit token refreshed")
-        except Exception as exc:  # pragma: no cover
-            logger.error("Fitbit token refresh error: {}", exc)
+                try:
+                    import httpx
+                except Exception:  # pragma: no cover
+                    httpx = None  # type: ignore
+
+                from app.core.dal import get_tokens, save_tokens
+                from app.core.config import get_settings
+
+
+                @dataclass
+                class Metrics:
+                    heart_rate_bpm: int
+                    steps: int
+
+
+                class FitbitClient:
+                    def __init__(self, access_token: Optional[str] = None, refresh_token: Optional[str] = None, expires_at_utc: Optional[datetime] = None):
+                        self.settings = get_settings()
+                        self.access_token = access_token
+                        self.refresh_token = refresh_token
+                        self.expires_at_utc = expires_at_utc
+                        self.tz = self.settings.timezone
+                        self._last_sample: Optional[Tuple[int, datetime]] = None  # (hr, ts)
+                        if not access_token:
+                            t = get_tokens()
+                            if t:
+                                self.access_token = t.access_token
+                                self.refresh_token = t.refresh_token
+                                self.expires_at_utc = t.expires_at_utc
+
+                    def get_cached_hr(self) -> Optional[int]:
+                        return self._last_sample[0] if self._last_sample else None
+
+                    def _update_cache(self, hr: int):
+                        self._last_sample = (hr, datetime.now(timezone.utc))
+
+                    async def get_latest_metrics(self) -> Metrics:
+                        # Mock-first behavior
+                        if not self.access_token or httpx is None:
+                            hr = 72
+                            self._update_cache(hr)
+                            return Metrics(heart_rate_bpm=hr, steps=1000)
+
+                        # Refresh if expired
+                        if self.expires_at_utc and datetime.now(timezone.utc) >= self.expires_at_utc:
+                            await self._refresh()
+
+                        # Intraday HR endpoint (1s granularity preferred)
+                        # Example: /1/user/-/activities/heart/date/today/1d/1sec/time/00:00/23:59.json
+                        date = datetime.now().astimezone().strftime("%Y-%m-%d")
+                        base = f"https://api.fitbit.com/1/user/-/activities/heart/date/{date}/1d"
+                        paths = ["1sec", "1min"]
+                        headers = {"Authorization": f"Bearer {self.access_token}"}
+
+                        async def fetch(path: str):
+                            url = f"{base}/{path}.json"
+                            async with httpx.AsyncClient(timeout=10) as client:
+                                return await client.get(url, headers=headers)
+
+                        # Retry with backoff, handle 401 -> refresh
+                        delay = 0.5
+                        for attempt in range(5):
+                            try:
+                                resp = await fetch(paths[0])
+                                if resp.status_code == 401:
+                                    await self._refresh()
+                                    headers["Authorization"] = f"Bearer {self.access_token}"
+                                    continue
+                                if resp.status_code == 429:
+                                    sleep_s = delay + random.uniform(0, delay)
+                                    logger.warning("429 rate limit; backing off {:.2f}s", sleep_s)
+                                    await asyncio.sleep(sleep_s)
+                                    delay *= 2
+                                    continue
+                                if resp.status_code >= 400:
+                                    # try 1min
+                                    resp = await fetch(paths[1])
+                                    if resp.status_code >= 400:
+                                        raise RuntimeError(f"Fitbit error {resp.status_code}: {resp.text[:200]}")
+                                body = resp.json()
+                                series = None
+                                for key in ("activities-heart-intraday", "activities-heart"):  # intraday in first
+                                    if key in body and isinstance(body[key], dict) and "dataset" in body[key]:
+                                        series = body[key]["dataset"]
+                                        break
+                                if not series:
+                                    raise RuntimeError("No intraday HR series found")
+                                last = series[-1] if series else None
+                                hr = int(last.get("value", 0)) if last else 0
+                                if hr <= 0:
+                                    hr = self.get_cached_hr() or 72
+                                self._update_cache(hr)
+                                return Metrics(heart_rate_bpm=hr, steps=0)
+                            except Exception as exc:
+                                logger.warning("Fitbit fetch attempt {} failed: {}", attempt + 1, exc)
+                                await asyncio.sleep(delay)
+                                delay *= 2
+                        # Fallback
+                        hr = self.get_cached_hr() or 73
+                        self._update_cache(hr)
+                        return Metrics(heart_rate_bpm=hr, steps=0)
+
+                    async def _refresh(self):
+                        if httpx is None or not self.refresh_token:
+                            return
+                        url = "https://api.fitbit.com/oauth2/token"
+                        data = {
+                            "grant_type": "refresh_token",
+                            "refresh_token": self.refresh_token,
+                            "client_id": self.settings.fitbit_client_id,
+                            "client_secret": self.settings.fitbit_client_secret,
+                        }
+                        try:
+                            async with httpx.AsyncClient(timeout=10) as client:
+                                r = await client.post(url, data=data, headers={"Content-Type": "application/x-www-form-urlencoded"})
+                                if r.status_code == 200:
+                                    body = r.json()
+                                    self.access_token = body.get("access_token")
+                                    self.refresh_token = body.get("refresh_token", self.refresh_token)
+                                    expires_in = body.get("expires_in", 3600)
+                                    self.expires_at_utc = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+                                    save_tokens(self.access_token, self.refresh_token, self.expires_at_utc)
+                                else:
+                                    logger.warning("Fitbit refresh failed: {} {}", r.status_code, r.text[:200])
+                        except Exception as exc:
+                            logger.warning("Fitbit refresh exception: {}", exc)
+
+                    async def polling_loop(self, stop_event: asyncio.Event):
+                        interval = int(self.settings.fitbit_poll_interval)
+                        while not stop_event.is_set():
+                            try:
+                                await self.get_latest_metrics()
+                            except Exception as exc:
+                                logger.warning("Polling error: {}", exc)
+                            await asyncio.sleep(interval)

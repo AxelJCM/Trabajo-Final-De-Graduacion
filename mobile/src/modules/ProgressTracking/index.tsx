@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, Button } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getBiometricsLast } from '../../services/api';
 import { getBiometrics, getRoutine } from '../../services/api';
 
 // ProgressTracking module shows user's progress and statistics.
@@ -36,6 +37,13 @@ export default function ProgressTracking() {
 
   useEffect(() => {
     refresh();
+    const id = setInterval(async () => {
+      try {
+        const last = await getBiometricsLast();
+        if (typeof last?.heart_rate_bpm === 'number') setHr(last.heart_rate_bpm);
+      } catch {}
+    }, 8000);
+    return () => clearInterval(id);
   }, []);
 
   return (

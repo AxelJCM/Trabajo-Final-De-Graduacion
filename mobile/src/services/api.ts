@@ -41,3 +41,8 @@ export const saveConfig = async (config: { language?: string; intensity?: string
   await AsyncStorage.setItem('config', JSON.stringify(data));
   return data;
 };
+
+export const getBiometricsLast = async () => {
+  const res = await api.get('/biometrics/last');
+  return res.data.data;
+};
