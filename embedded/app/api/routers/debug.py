@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Response
-from fastapi.responses import StreamingResponse, PlainTextResponse
+from fastapi.responses import StreamingResponse, PlainTextResponse, HTMLResponse
 from typing import Iterator
 from pathlib import Path
 import time
@@ -40,7 +40,15 @@ def mjpeg_frames() -> Iterator[bytes]:
 
 @router.get("/debug/stream")
 async def stream() -> StreamingResponse:
-    return StreamingResponse(mjpeg_frames(), media_type="multipart/x-mixed-replace; boundary=frame")
+    return StreamingResponse(
+        mjpeg_frames(),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
 
 
 @router.get("/debug/logs")
@@ -75,3 +83,27 @@ async def snapshot() -> Response:
     img = np.zeros((360, 640, 3), dtype=np.uint8)
     ret, buf = cv2.imencode('.jpg', img)
     return Response(content=(buf.tobytes() if ret else b""), media_type="image/jpeg")
+
+
+@router.get("/debug/view")
+async def view() -> HTMLResponse:
+        # Simple page that embeds the MJPEG stream
+        html = """
+        <!doctype html>
+        <html>
+        <head>
+            <meta charset=\"utf-8\" />
+            <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
+            <title>Camera Stream</title>
+            <style>body{margin:0;background:#111;color:#eee;font-family:sans-serif} .wrap{display:flex;flex-direction:column;align-items:center;gap:12px;padding:12px} img{max-width:100%;height:auto;border:1px solid #333}</style>
+        </head>
+        <body>
+            <div class=\"wrap\">
+                <h3>Live Camera</h3>
+                <img src=\"/debug/stream\" alt=\"stream\" />
+                <p><a href=\"/debug/snapshot.jpg\" target=\"_blank\">Open snapshot</a> | <a href=\"/debug/logs\" target=\"_blank\">View logs</a></p>
+            </div>
+        </body>
+        </html>
+        """
+        return HTMLResponse(content=html)
