@@ -81,11 +81,15 @@ class PoseEstimator:
         self.height = int(os.getenv("CAMERA_HEIGHT", "480"))
         self.target_fps = int(os.getenv("CAMERA_FPS", "30"))
         self.model_complexity = int(os.getenv("MODEL_COMPLEXITY", "0"))
+        self.vision_mock = os.getenv("VISION_MOCK", "0") in {"1", "true", "TRUE", "yes", "on"}
         self.cap = None
         self.pose = None
         self._init_video_and_model()
 
     def _init_video_and_model(self):
+        if self.vision_mock:
+            logger.info("VISION_MOCK is enabled; skipping camera and model init")
+            return
         if cv2 is not None:
             try:
                 cap = cv2.VideoCapture(self.camera_index)
@@ -164,8 +168,8 @@ class PoseEstimator:
         return PostureOutput(joints=joints, angles=angles, feedback=feedback, quality=max(0.0, min(100.0, quality)), fps=fps)
 
     def analyze_frame(self) -> PostureOutput:
-        # If no camera or mediapipe, return mock
-        if self.cap is None or self.pose is None:
+        # If mock flag set or no camera/model, return mock
+        if self.vision_mock or self.cap is None or self.pose is None:
             return self._mock_output()
 
         t0 = time.time()
