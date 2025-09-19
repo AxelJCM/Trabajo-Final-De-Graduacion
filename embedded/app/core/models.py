@@ -14,6 +14,11 @@ class Token(Base):
     access_token = Column(String, nullable=False)
     refresh_token = Column(String, nullable=False)
     expires_at_utc = Column(DateTime, nullable=False)
+    provider = Column(String, default="fitbit")
+    scope = Column(String, nullable=True)
+    token_type = Column(String, nullable=True)
+    created_at_utc = Column(DateTime, default=datetime.utcnow)
+    updated_at_utc = Column(DateTime, default=datetime.utcnow)
 
 
 class UserConfig(Base):

@@ -156,7 +156,15 @@ class FitbitClient:
                     if self.access_token and self.refresh_token and expires_in:
                         db = SessionLocal()
                         try:
-                            dal_save_tokens(db, self.access_token, self.refresh_token, int(expires_in))
+                            dal_save_tokens(
+                                db,
+                                self.access_token,
+                                self.refresh_token,
+                                int(expires_in),
+                                provider="fitbit",
+                                scope=body.get("scope"),
+                                token_type=body.get("token_type"),
+                            )
                         finally:
                             db.close()
                 else:

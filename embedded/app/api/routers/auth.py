@@ -59,7 +59,15 @@ def fitbit_callback(code: str, db: Session = Depends(get_db)) -> dict:
         )
         r.raise_for_status()
         payload = r.json()
-        save_tokens(db, payload.get("access_token"), payload.get("refresh_token"), payload.get("expires_in", 28800))
+        save_tokens(
+            db,
+            payload.get("access_token"),
+            payload.get("refresh_token"),
+            payload.get("expires_in", 28800),
+            provider="fitbit",
+            scope=payload.get("scope"),
+            token_type=payload.get("token_type"),
+        )
         logger.info("Fitbit tokens saved")
         return {"success": True}
     except Exception as exc:  # pragma: no cover
@@ -92,9 +100,33 @@ def fitbit_refresh(db: Session = Depends(get_db)) -> dict:
         )
         r.raise_for_status()
         payload = r.json()
-        save_tokens(db, payload.get("access_token"), payload.get("refresh_token"), payload.get("expires_in", 28800))
+        save_tokens(
+            db,
+            payload.get("access_token"),
+            payload.get("refresh_token"),
+            payload.get("expires_in", 28800),
+            provider="fitbit",
+            scope=payload.get("scope"),
+            token_type=payload.get("token_type"),
+        )
         logger.info("Fitbit tokens refreshed")
         return {"success": True}
     except Exception as exc:  # pragma: no cover
         logger.error("Fitbit refresh error: {}", exc)
         return {"success": False, "error": str(exc)}
+
+
+@router.get("/auth/fitbit/status")
+def fitbit_status(db: Session = Depends(get_db)) -> dict:
+    tok = get_tokens(db)
+    if not tok:
+        return {"connected": False}
+    remaining = (tok.expires_at_utc - tok.updated_at_utc).total_seconds() if tok.expires_at_utc and tok.updated_at_utc else None
+    return {
+        "connected": True,
+        "provider": tok.provider,
+        "expires_at_utc": tok.expires_at_utc.isoformat() if tok.expires_at_utc else None,
+        "scope": tok.scope,
+        "token_type": tok.token_type,
+        "seconds_to_expiry": remaining,
+    }

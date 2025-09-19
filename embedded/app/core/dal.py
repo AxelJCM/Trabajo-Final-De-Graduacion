@@ -5,6 +5,8 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from sqlalchemy.orm import Session
+from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 
 from .models import Token, UserConfig, SessionMetrics
 
@@ -40,19 +42,76 @@ def get_tokens(db: Session) -> Optional[Token]:
     return db.query(Token).filter(Token.id == 1).first()
 
 
-def save_tokens(db: Session, access_token: str, refresh_token: str, expires_in: int) -> Token:
-    expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
+def save_tokens(
+    db: Session,
+    access_token: str,
+    refresh_token: str,
+    expires_in: Optional[int] = None,
+    *,
+    provider: str = "fitbit",
+    scope: Optional[str] = None,
+    token_type: Optional[str] = None,
+    expires_at_utc: Optional[datetime] = None,
+) -> Token:
+    """Upsert OAuth tokens with optional metadata.
+
+    If ``expires_at_utc`` is not provided, it is computed from ``expires_in``.
+    """
+    if expires_at_utc is None:
+        if expires_in is None:
+            expires_in = 3600
+        expires_at_utc = datetime.utcnow() + timedelta(seconds=int(expires_in))
+
     tok = get_tokens(db)
+    now = datetime.utcnow()
     if not tok:
-        tok = Token(id=1, access_token=access_token, refresh_token=refresh_token, expires_at_utc=expires_at)
+        tok = Token(
+            id=1,
+            access_token=access_token,
+            refresh_token=refresh_token,
+            expires_at_utc=expires_at_utc,
+            provider=provider,
+            scope=scope,
+            token_type=token_type,
+            created_at_utc=now,
+            updated_at_utc=now,
+        )
     else:
         tok.access_token = access_token
         tok.refresh_token = refresh_token
-        tok.expires_at_utc = expires_at
-    db.add(tok)
-    db.commit()
-    db.refresh(tok)
-    return tok
+        tok.expires_at_utc = expires_at_utc
+        tok.provider = provider or tok.provider
+        tok.scope = scope or tok.scope
+        tok.token_type = token_type or tok.token_type
+        tok.updated_at_utc = now
+    try:
+        db.add(tok)
+        db.commit()
+        db.refresh(tok)
+        return tok
+    except OperationalError:
+        # Fallback for existing DBs without new columns
+        # Ensure row exists
+        res = db.execute(text("SELECT id FROM token WHERE id=1"))
+        row = res.first()
+        if row is None:
+            db.execute(
+                text(
+                    "INSERT INTO token (id, access_token, refresh_token, expires_at_utc) VALUES (1, :a, :r, :e)"
+                ),
+                {"a": access_token, "r": refresh_token, "e": expires_at_utc},
+            )
+        else:
+            db.execute(
+                text(
+                    "UPDATE token SET access_token=:a, refresh_token=:r, expires_at_utc=:e WHERE id=1"
+                ),
+                {"a": access_token, "r": refresh_token, "e": expires_at_utc},
+            )
+        db.commit()
+        # Re-read using ORM (with whatever columns are present)
+        tok = get_tokens(db)
+        return tok
 
 
 def add_session_metrics(db: Session, **kwargs) -> SessionMetrics:
