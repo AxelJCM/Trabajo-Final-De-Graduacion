@@ -41,6 +41,9 @@ class PostureOutput(BaseModel):
     angles: Angles
     quality: float
     feedback: str
+    exercise: str | None = None
+    phase: str | None = None
+    rep_count: int | None = None
 
 
 class BiometricsInput(BaseModel):

@@ -57,6 +57,9 @@ class PostureOutput:
     feedback: str
     quality: float
     fps: float
+    exercise: str
+    phase: str
+    rep_count: int
 
 
 def _angle(a, b, c) -> float:
@@ -84,6 +87,13 @@ class PoseEstimator:
         self.vision_mock = os.getenv("VISION_MOCK", "0") in {"1", "true", "TRUE", "yes", "on"}
         self.cap = None
         self.pose = None
+        # Repetition counting state
+        self.exercise = os.getenv("EXERCISE", "squat").lower()
+        self.phase = "up"  # up|down for squat
+        self.rep_count = 0
+        # Thresholds with hysteresis for squat knee angle
+        self.squat_up_threshold = float(os.getenv("SQUAT_UP_DEG", "150"))
+        self.squat_down_threshold = float(os.getenv("SQUAT_DOWN_DEG", "100"))
         self._init_video_and_model()
 
     def _init_video_and_model(self):
@@ -125,7 +135,7 @@ class PoseEstimator:
             Joint("right_knee", 0.52, 0.82, 0.8),
         ]
         angles = Angles(160.0, 160.0, 170.0, 170.0, 0.0)
-        return PostureOutput(joints=joints, angles=angles, feedback="Postura OK", quality=87.0, fps=0.0)
+        return PostureOutput(joints=joints, angles=angles, feedback="Postura OK", quality=87.0, fps=0.0, exercise=self.exercise, phase=self.phase, rep_count=self.rep_count)
 
     def _compute_output(self, landmarks_norm, fps: float) -> PostureOutput:
         lm = {name: (landmarks_norm[name][0], landmarks_norm[name][1]) for name in landmarks_norm}
@@ -165,7 +175,31 @@ class PoseEstimator:
 
         feedback = "Postura OK" if quality >= 80 else ("Atención a la alineación" if quality >= 60 else "Corrige postura")
 
-        return PostureOutput(joints=joints, angles=angles, feedback=feedback, quality=max(0.0, min(100.0, quality)), fps=fps)
+        # Repetition counting for squat
+        if self.exercise == "squat":
+            # Use the minimum knee angle as the movement indicator (both legs)
+            knee_angle = 0.0
+            knees = [ang_left_knee, ang_right_knee]
+            knees = [k for k in knees if k > 0]
+            if knees:
+                knee_angle = min(knees)
+                # Phase transitions with hysteresis
+                if self.phase == "up" and knee_angle < self.squat_down_threshold:
+                    self.phase = "down"
+                elif self.phase == "down" and knee_angle > self.squat_up_threshold:
+                    self.phase = "up"
+                    self.rep_count += 1
+        
+        return PostureOutput(
+            joints=joints,
+            angles=angles,
+            feedback=feedback,
+            quality=max(0.0, min(100.0, quality)),
+            fps=fps,
+            exercise=self.exercise,
+            phase=self.phase,
+            rep_count=self.rep_count,
+        )
 
     def analyze_frame(self) -> PostureOutput:
         # If mock flag set or no camera/model, return mock
