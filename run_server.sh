@@ -6,6 +6,14 @@ set -e
 cd "$(dirname "$0")"
 cd embedded
 
+# Load .env if present
+if [ -f .env ]; then
+	set -a
+	# shellcheck disable=SC1091
+	. ./.env
+	set +a
+fi
+
 # Performance-friendly defaults for Raspberry Pi
 export MODEL_COMPLEXITY=${MODEL_COMPLEXITY:-0}
 export CAMERA_WIDTH=${CAMERA_WIDTH:-640}

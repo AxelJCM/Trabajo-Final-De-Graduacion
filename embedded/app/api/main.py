@@ -50,6 +50,7 @@ async def lifespan(app: FastAPI):
             task = asyncio.create_task(client.polling_loop(stop_event))
             app.state._fitbit_task = task
             app.state._fitbit_stop = stop_event
+            app.state.fitbit_client = client
     finally:
         db.close()
     yield
@@ -58,6 +59,8 @@ async def lifespan(app: FastAPI):
         app.state._fitbit_stop.set()
     if getattr(app.state, "_fitbit_task", None):
         await app.state._fitbit_task
+    if hasattr(app.state, "fitbit_client"):
+        delattr(app.state, "fitbit_client")
 
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)

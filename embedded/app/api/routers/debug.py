@@ -7,6 +7,7 @@ from pathlib import Path
 import time
 
 from app.api.routers.posture import pose_estimator
+from app.api.main import app
 
 router = APIRouter()
 
@@ -91,6 +92,31 @@ def mjpeg_frames(overlay: bool = True) -> Iterator[bytes]:
                 except Exception:
                     # Keep streaming even if pose inference fails
                     pass
+
+            # HR overlay (cached)
+            try:
+                hr_txt = None
+                if hasattr(app.state, "fitbit_client"):
+                    hr = app.state.fitbit_client.get_cached_hr()
+                    if hr is not None:
+                        # Simple zones: <100 low, 100-130 mod, 130-160 high, >160 very high (tune later by age)
+                        if hr < 100:
+                            color = (100, 255, 100)
+                            zone = "LOW"
+                        elif hr < 130:
+                            color = (255, 255, 0)
+                            zone = "MOD"
+                        elif hr < 160:
+                            color = (255, 165, 0)
+                            zone = "HIGH"
+                        else:
+                            color = (50, 50, 255)
+                            zone = "VH"
+                        hr_txt = f"HR: {hr} bpm [{zone}]"
+                        cv2.rectangle(frame, (10, 45), (10 + 220, 75), (0, 0, 0), -1)
+                        cv2.putText(frame, hr_txt, (18, 68), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
+            except Exception:
+                pass
 
             ret, buf = cv2.imencode('.jpg', frame)
             if not ret:
