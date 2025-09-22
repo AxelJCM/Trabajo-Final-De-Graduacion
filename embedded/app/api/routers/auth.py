@@ -1,10 +1,13 @@
 """Fitbit OAuth2 endpoints: login and callback.
 
 Builds auth URL and exchanges code for tokens, stored via TokenStore.
+Supports optional redirect override passed via `state` so the
+`redirect_uri` used in token exchange matches the authorize step.
 """
 from __future__ import annotations
 
 import base64
+import json
 import urllib.parse
 
 import requests
@@ -21,30 +24,46 @@ Base.metadata.create_all(bind=engine)
 
 
 @router.get("/auth/fitbit/login")
-def fitbit_login() -> Response:
+def fitbit_login(redirect: str | None = None) -> Response:
     s = get_settings()
     client_id = s.fitbit_client_id
     redirect_uri = s.fitbit_redirect_uri
     scope = "heartrate profile activity"
+    state_obj = {}
+    if redirect:
+        state_obj["r"] = redirect
+        redirect_uri = redirect
+    state = base64.urlsafe_b64encode(json.dumps(state_obj).encode()).decode() if state_obj else None
     params = {
         "client_id": client_id,
         "response_type": "code",
         "scope": scope,
         "redirect_uri": redirect_uri,
     }
+    if state:
+        params["state"] = state
     url = "https://www.fitbit.com/oauth2/authorize?" + urllib.parse.urlencode(params)
     return Response(status_code=302, headers={"Location": url})
 
 
 @router.get("/auth/fitbit/callback")
-def fitbit_callback(code: str, db: Session = Depends(get_db)) -> dict:
+def fitbit_callback(code: str, state: str | None = None, db: Session = Depends(get_db)) -> dict:
     s = get_settings()
     token_url = "https://api.fitbit.com/oauth2/token"
     auth_hdr = base64.b64encode(f"{s.fitbit_client_id}:{s.fitbit_client_secret}".encode()).decode()
+    # Use configured redirect by default; allow override if provided in state
+    redirect_uri = s.fitbit_redirect_uri
+    if state:
+        try:
+            decoded = json.loads(base64.urlsafe_b64decode(state.encode()).decode())
+            if isinstance(decoded, dict) and decoded.get("r"):
+                redirect_uri = str(decoded["r"])
+        except Exception:
+            pass
     data = {
         "client_id": s.fitbit_client_id,
         "grant_type": "authorization_code",
-        "redirect_uri": s.fitbit_redirect_uri,
+        "redirect_uri": redirect_uri,
         "code": code,
     }
     try:

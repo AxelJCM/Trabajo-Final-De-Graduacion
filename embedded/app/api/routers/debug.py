@@ -198,13 +198,24 @@ async def view() -> HTMLResponse:
                 <h3>Live Camera</h3>
                                 <div class=\"toolbar\">
                                     <button class=\"btn\" onclick=\"window.location='/auth/fitbit/login'\">Connect Fitbit</button>
+                                    <button class=\"btn\" onclick=\"loginWithHost()\">Login with this IP</button>
                                     <span class=\"status\" id=\"fitbitStatus\">Fitbit: checking…</span>
                                     <a href=\"/auth/fitbit/status\" target=\"_blank\" title=\"Open status JSON\">JSON</a>
                                 </div>
+                                <small>
+                                  Tip: si aparece un error de Redirect URI, use <b>Login with this IP</b> y registre esta URL exacta en el portal de Fitbit:<br/>
+                                  <code id=\"redirVal\"></code>
+                                </small>
                 <img src=\"/debug/stream?overlay=1\" alt=\"stream\" />
                 <p><a href=\"/debug/snapshot.jpg\" target=\"_blank\">Open snapshot</a> | <a href=\"/debug/logs\" target=\"_blank\">View logs</a> | <a href=\"/debug/stream?overlay=0\" target=\"_blank\">Raw stream</a></p>
             </div>
                         <script>
+                            function loginWithHost(){
+                                const origin = window.location.origin;
+                                const redirect = origin + '/auth/fitbit/callback';
+                                const url = '/auth/fitbit/login?redirect=' + encodeURIComponent(redirect);
+                                window.location = url;
+                            }
                             async function refreshStatus(){
                                 try{
                                     const r = await fetch('/auth/fitbit/status', {cache:'no-store'});
@@ -216,6 +227,13 @@ async def view() -> HTMLResponse:
                             }
                             refreshStatus();
                             setInterval(refreshStatus, 5000);
+                            // show the exact redirect to register
+                            try{
+                                const origin = window.location.origin;
+                                const redirect = origin + '/auth/fitbit/callback';
+                                const elr = document.getElementById('redirVal');
+                                if(elr) elr.textContent = redirect;
+                            }catch(e){}
                         </script>
         </body>
         </html>
