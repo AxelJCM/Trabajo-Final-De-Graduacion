@@ -175,21 +175,48 @@ async def snapshot() -> Response:
 @router.get("/debug/view")
 async def view() -> HTMLResponse:
         # Simple page that embeds the MJPEG stream
-        html = """
+                html = """
         <!doctype html>
         <html>
         <head>
             <meta charset=\"utf-8\" />
             <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
             <title>Camera Stream</title>
-            <style>body{margin:0;background:#111;color:#eee;font-family:sans-serif} .wrap{display:flex;flex-direction:column;align-items:center;gap:12px;padding:12px} img{max-width:100%;height:auto;border:1px solid #333} a{color:#8ab4f8}</style>
+                        <style>
+                            body{margin:0;background:#111;color:#eee;font-family:sans-serif}
+                            .wrap{display:flex;flex-direction:column;align-items:center;gap:12px;padding:12px}
+                            img{max-width:100%;height:auto;border:1px solid #333}
+                            a{color:#8ab4f8}
+                            .toolbar{display:flex;gap:12px;align-items:center}
+                            .btn{background:#1976d2;color:#fff;border:none;padding:8px 12px;border-radius:4px;cursor:pointer}
+                            .btn:hover{background:#1565c0}
+                            .status{font-weight:600}
+                        </style>
         </head>
         <body>
             <div class=\"wrap\">
                 <h3>Live Camera</h3>
+                                <div class=\"toolbar\">
+                                    <button class=\"btn\" onclick=\"window.location='/auth/fitbit/login'\">Connect Fitbit</button>
+                                    <span class=\"status\" id=\"fitbitStatus\">Fitbit: checking…</span>
+                                    <a href=\"/auth/fitbit/status\" target=\"_blank\" title=\"Open status JSON\">JSON</a>
+                                </div>
                 <img src=\"/debug/stream?overlay=1\" alt=\"stream\" />
                 <p><a href=\"/debug/snapshot.jpg\" target=\"_blank\">Open snapshot</a> | <a href=\"/debug/logs\" target=\"_blank\">View logs</a> | <a href=\"/debug/stream?overlay=0\" target=\"_blank\">Raw stream</a></p>
             </div>
+                        <script>
+                            async function refreshStatus(){
+                                try{
+                                    const r = await fetch('/auth/fitbit/status', {cache:'no-store'});
+                                    const d = await r.json();
+                                    const el = document.getElementById('fitbitStatus');
+                                    if(d && d.connected){ el.textContent = 'Fitbit: connected'; el.style.color = '#00e676'; }
+                                    else { el.textContent = 'Fitbit: not connected'; el.style.color = '#ff5252'; }
+                                }catch(e){ /* ignore */ }
+                            }
+                            refreshStatus();
+                            setInterval(refreshStatus, 5000);
+                        </script>
         </body>
         </html>
         """
