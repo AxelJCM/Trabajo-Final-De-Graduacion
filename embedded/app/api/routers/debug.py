@@ -1,18 +1,17 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, Response, Request
 from fastapi.responses import StreamingResponse, PlainTextResponse, HTMLResponse
 from typing import Iterator
 from pathlib import Path
 import time
 
 from app.api.routers.posture import pose_estimator
-from app.api.main import app
 
 router = APIRouter()
 
 
-def mjpeg_frames(overlay: bool = True) -> Iterator[bytes]:
+def mjpeg_frames(overlay: bool = True, app_state=None) -> Iterator[bytes]:
     cap = pose_estimator.cap
     import cv2  # type: ignore
     import numpy as np  # type: ignore
@@ -96,8 +95,8 @@ def mjpeg_frames(overlay: bool = True) -> Iterator[bytes]:
             # HR overlay (cached)
             try:
                 hr_txt = None
-                if hasattr(app.state, "fitbit_client"):
-                    hr = app.state.fitbit_client.get_cached_hr()
+                if app_state is not None and hasattr(app_state, "fitbit_client"):
+                    hr = app_state.fitbit_client.get_cached_hr()
                     if hr is not None:
                         # Simple zones: <100 low, 100-130 mod, 130-160 high, >160 very high (tune later by age)
                         if hr < 100:
@@ -127,9 +126,9 @@ def mjpeg_frames(overlay: bool = True) -> Iterator[bytes]:
 
 
 @router.get("/debug/stream")
-async def stream(overlay: int = 1) -> StreamingResponse:
+async def stream(request: Request, overlay: int = 1) -> StreamingResponse:
     return StreamingResponse(
-        mjpeg_frames(overlay=bool(overlay)),
+        mjpeg_frames(overlay=bool(overlay), app_state=request.app.state),
         media_type="multipart/x-mixed-replace; boundary=frame",
         headers={
             "Cache-Control": "no-cache, no-store, must-revalidate",
