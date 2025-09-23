@@ -11,7 +11,7 @@ import json
 import urllib.parse
 
 import requests
-from fastapi import APIRouter, Response, Depends
+from fastapi import APIRouter, Response, Depends, Request
 from loguru import logger
 
 from app.core.config import get_settings
@@ -24,7 +24,7 @@ Base.metadata.create_all(bind=engine)
 
 
 @router.get("/auth/fitbit/login")
-def fitbit_login(redirect: str | None = None) -> Response:
+def fitbit_login(request: Request, redirect: str | None = None) -> Response:
     s = get_settings()
     client_id = s.fitbit_client_id
     redirect_uri = s.fitbit_redirect_uri
@@ -42,6 +42,23 @@ def fitbit_login(redirect: str | None = None) -> Response:
     }
     if state:
         params["state"] = state
+    # Fallback: if no redirect provided and no configured redirect, infer from request
+    if not redirect and not s.fitbit_redirect_uri:
+        try:
+            inferred = str(request.url_for("fitbit_callback"))
+            params["redirect_uri"] = inferred
+            redirect_uri = inferred
+        except Exception:
+            pass
+    # Guard: ensure client_id is configured
+    if not client_id:
+        from fastapi.responses import HTMLResponse
+        html = (
+            "<h3>Fitbit setup required</h3>"
+            "<p>Missing <code>FITBIT_CLIENT_ID</code>. Set it in <code>embedded/.env</code> and restart the server.</p>"
+            "<p>Also set <code>FITBIT_CLIENT_SECRET</code> and, if needed, <code>FITBIT_REDIRECT_URI</code> to your registered callback, e.g. <code>http://&lt;PI_IP&gt;:8000/auth/fitbit/callback</code>.</p>"
+        )
+        return HTMLResponse(html, status_code=400)
     url = "https://www.fitbit.com/oauth2/authorize?" + urllib.parse.urlencode(params)
     return Response(status_code=302, headers={"Location": url})
 
