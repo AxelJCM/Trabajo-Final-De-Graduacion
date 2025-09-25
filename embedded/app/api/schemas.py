@@ -56,15 +56,7 @@ class BiometricsOutput(BaseModel):
     timestamp: str
 
 
-class RoutineInput(BaseModel):
-    user_id: str
-    performance: Optional[dict] = None  # posture and HR feedback
-
-
-class RoutineOutput(BaseModel):
-    routine_id: str
-    blocks: list
-    duration_min: int
+# Routine schemas removed (scope reduction)
 
 
 class ConfigInput(BaseModel):

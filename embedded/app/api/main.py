@@ -3,7 +3,6 @@
 Endpoints:
 - POST /posture: posture analysis results (JSON)
 - POST /biometrics: biometrics ingestion and retrieval (JSON)
-- POST /routine: get or update current routine (JSON)
 - POST /config: update/read configuration (JSON)
 
 This module wires sub-routers from domain modules and provides a health check.
@@ -18,7 +17,6 @@ from pathlib import Path
 from app.core.config import get_settings
 from app.api.routers.posture import router as posture_router
 from app.api.routers.biometrics import router as biometrics_router
-from app.api.routers.routine import router as routine_router
 from app.api.routers.config_router import router as config_router
 from app.api.routers.auth import router as auth_router
 from app.api.routers.voice import router as voice_router
@@ -86,7 +84,6 @@ async def health() -> dict:
 # Routers
 app.include_router(posture_router, prefix="", tags=["posture"])
 app.include_router(biometrics_router, prefix="", tags=["biometrics"])
-app.include_router(routine_router, prefix="", tags=["routine"])
 app.include_router(config_router, prefix="", tags=["config"])
 app.include_router(auth_router, prefix="", tags=["auth"])
 app.include_router(voice_router, prefix="", tags=["voice"])

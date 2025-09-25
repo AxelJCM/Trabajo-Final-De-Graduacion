@@ -4,7 +4,6 @@ Provides the Smart Mirror backend running on Raspberry Pi 4.
 
 - Vision (OpenCV + MediaPipe)
 - Biometrics (Fitbit Web API)
-- Trainer (adaptive routines)
 - Voice (Vosk/Google)
 - GUI (PyQt5 or Tkinter)
 
@@ -23,7 +22,6 @@ python -m venv .venv; .\.venv\Scripts\Activate.ps1; pip install -r embedded/requ
 - GET /health
 - POST /posture
 - POST /biometrics
-- POST /routine
 - POST /config
 - POST /voice/test
 

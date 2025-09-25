@@ -22,7 +22,7 @@ Todas las respuestas: { success, data, error }.
 - Fitbit Web API (OAuth2)
 
 ## Desarrollo rápido
-- Backend: ver embedded/README.md
+- Backend: ver embedded/README.md. Las variables de entorno se configuran en `embedded/.env` (plantilla en `embedded/.env.example`).
 - Móvil: ver mobile/README.md
 
 ## Licencia

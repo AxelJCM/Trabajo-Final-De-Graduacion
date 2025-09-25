@@ -33,13 +33,7 @@ async def test_biometrics():
     assert body["success"] is True
 
 
-@pytest.mark.asyncio
-async def test_routine():
-    async with AsyncClient(app=app, base_url="http://test") as ac:
-        r = await ac.post("/routine", json={"user_id": "u1"})
-    assert r.status_code == 200
-    body = r.json()
-    assert body["success"] is True
+# routine endpoint removed per scope reduction
 
 
 @pytest.mark.asyncio

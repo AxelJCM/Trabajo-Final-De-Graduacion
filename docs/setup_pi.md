@@ -7,7 +7,7 @@ Steps:
 - python -m venv .venv; source .venv/bin/activate
 - sudo apt-get update && sudo apt-get install -y libatlas-base-dev libcap-dev v4l-utils
 - pip install -r embedded/requirements.txt
-- Copy .env.example to .env and set EXPOSED_ORIGINS and optional API_KEY
+- Copy embedded/.env.example to embedded/.env and set FITBIT_* and camera settings
 - For camera, verify device: `v4l2-ctl --list-devices` and `ls -l /dev/video*`; set CAMERA_INDEX accordingly.
 - For performance on Pi 4: `CAMERA_WIDTH=640`, `CAMERA_HEIGHT=480`, `CAMERA_FPS=30`, `MODEL_COMPLEXITY=0`.
 - Run server: `python embedded/run_server.py`
