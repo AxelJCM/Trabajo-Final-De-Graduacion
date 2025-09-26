@@ -7,6 +7,9 @@ from pathlib import Path
 import time
 
 from app.api.routers.posture import pose_estimator
+from app.core.config import get_settings
+from app.core.db import SessionLocal
+from app.core.dal import get_tokens
 
 router = APIRouter()
 
@@ -97,6 +100,7 @@ def mjpeg_frames(overlay: bool = True, app_state=None) -> Iterator[bytes]:
                 hr_txt = None
                 if app_state is not None and hasattr(app_state, "fitbit_client"):
                     hr = app_state.fitbit_client.get_cached_hr()
+                    steps = app_state.fitbit_client.get_cached_steps() if hasattr(app_state.fitbit_client, "get_cached_steps") else None
                     if hr is not None:
                         # Simple zones: <100 low, 100-130 mod, 130-160 high, >160 very high (tune later by age)
                         if hr < 100:
@@ -112,8 +116,14 @@ def mjpeg_frames(overlay: bool = True, app_state=None) -> Iterator[bytes]:
                             color = (50, 50, 255)
                             zone = "VH"
                         hr_txt = f"HR: {hr} bpm [{zone}]"
-                        cv2.rectangle(frame, (10, 45), (10 + 220, 75), (0, 0, 0), -1)
-                        cv2.putText(frame, hr_txt, (18, 68), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
+                        # Draw a background box tall enough for two lines if steps available
+                        box_w = 260
+                        box_h = 60 if steps is not None else 30
+                        cv2.rectangle(frame, (10, 45), (10 + box_w, 45 + box_h), (0, 0, 0), -1)
+                        cv2.putText(frame, hr_txt, (18, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
+                        if steps is not None:
+                            steps_txt = f"Steps: {steps:,}"
+                            cv2.putText(frame, steps_txt, (18, 85), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 2, cv2.LINE_AA)
             except Exception:
                 pass
 
@@ -239,3 +249,34 @@ async def view() -> HTMLResponse:
         </html>
         """
     return HTMLResponse(content=html)
+
+
+@router.get("/debug/diag")
+async def diag(request: Request) -> dict:
+    s = get_settings()
+    db = SessionLocal()
+    try:
+        tok = get_tokens(db)
+        camera_opened = bool(pose_estimator.cap is not None)
+        pose_ready = bool(pose_estimator.pose is not None)
+        return {
+            "camera": {
+                "opened": camera_opened,
+                "index": getattr(pose_estimator, "camera_index", None),
+                "width": getattr(pose_estimator, "width", None),
+                "height": getattr(pose_estimator, "height", None),
+                "fps_target": getattr(pose_estimator, "target_fps", None),
+                "vision_mock": getattr(pose_estimator, "vision_mock", None),
+                "pose_ready": pose_ready,
+                "model_complexity": getattr(pose_estimator, "model_complexity", None),
+            },
+            "fitbit": {
+                "client_id_set": bool(s.fitbit_client_id),
+                "redirect_uri": s.fitbit_redirect_uri,
+                "poll_interval": s.fitbit_poll_interval,
+                "tokens_present": bool(tok),
+                "app_state_client": bool(getattr(request.app.state, "fitbit_client", None)),
+            },
+        }
+    finally:
+        db.close()

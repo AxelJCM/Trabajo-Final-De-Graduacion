@@ -26,10 +26,11 @@ async def biometrics_endpoint() -> Envelope:
 async def biometrics_last() -> Envelope:
     client = FitbitClient()
     hr = client.get_cached_hr()
-    if hr is None:
+    steps_cached = client.get_cached_steps()
+    if hr is None or steps_cached is None:
         m = await client.get_latest_metrics()
         hr = m.heart_rate_bpm
         steps = m.steps
     else:
-        steps = 0
+        steps = steps_cached
     return Envelope(success=True, data={"heart_rate_bpm": hr, "steps": steps})

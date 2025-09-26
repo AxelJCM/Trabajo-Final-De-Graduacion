@@ -41,7 +41,8 @@ class FitbitClient:
         self.access_token = access_token
         self.refresh_token = refresh_token
         self.expires_at_utc = expires_at_utc
-        self._last_sample: Optional[Tuple[int, datetime]] = None  # (hr, ts)
+    self._last_sample: Optional[Tuple[int, datetime]] = None  # (hr, ts)
+    self._last_steps: Optional[Tuple[int, datetime]] = None   # (steps, ts)
 
         if not access_token:
             db = SessionLocal()
@@ -57,15 +58,23 @@ class FitbitClient:
     def get_cached_hr(self) -> Optional[int]:
         return self._last_sample[0] if self._last_sample else None
 
+    def get_cached_steps(self) -> Optional[int]:
+        return self._last_steps[0] if self._last_steps else None
+
     def _update_cache(self, hr: int):
         self._last_sample = (hr, datetime.now(timezone.utc))
+
+    def _update_steps_cache(self, steps: int):
+        self._last_steps = (steps, datetime.now(timezone.utc))
 
     async def get_latest_metrics(self) -> Metrics:
         # Mock-first behavior for offline/dev or missing deps/tokens
         if not self.access_token or httpx is None:
             hr = self.get_cached_hr() or 72
+            steps = self.get_cached_steps() or 0
             self._update_cache(hr)
-            return Metrics(heart_rate_bpm=hr, steps=0)
+            self._update_steps_cache(steps)
+            return Metrics(heart_rate_bpm=hr, steps=steps)
 
         # Refresh if expired
         if self.expires_at_utc and datetime.now(timezone.utc) >= self.expires_at_utc:
@@ -121,6 +130,7 @@ class FitbitClient:
                 self._update_cache(hr)
                 # Fetch daily steps similar to tutorial example
                 steps = await self._get_daily_steps(headers)
+                self._update_steps_cache(steps)
                 return Metrics(heart_rate_bpm=hr, steps=steps)
             except Exception as exc:
                 logger.warning("Fitbit fetch attempt {} failed: {}", attempt + 1, exc)
@@ -128,9 +138,11 @@ class FitbitClient:
                 delay *= 2
 
         # Fallback
-        hr = self.get_cached_hr() or 73
-        self._update_cache(hr)
-        return Metrics(heart_rate_bpm=hr, steps=0)
+    hr = self.get_cached_hr() or 73
+    steps = self.get_cached_steps() or 0
+    self._update_cache(hr)
+    self._update_steps_cache(steps)
+    return Metrics(heart_rate_bpm=hr, steps=steps)
 
     async def _refresh(self):
         if httpx is None or not self.refresh_token:
