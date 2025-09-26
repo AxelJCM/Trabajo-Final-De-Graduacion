@@ -119,7 +119,9 @@ class FitbitClient:
                 if hr <= 0:
                     hr = self.get_cached_hr() or 72
                 self._update_cache(hr)
-                return Metrics(heart_rate_bpm=hr, steps=0)
+                # Fetch daily steps similar to tutorial example
+                steps = await self._get_daily_steps(headers)
+                return Metrics(heart_rate_bpm=hr, steps=steps)
             except Exception as exc:
                 logger.warning("Fitbit fetch attempt {} failed: {}", attempt + 1, exc)
                 await asyncio.sleep(delay)
@@ -128,7 +130,7 @@ class FitbitClient:
         # Fallback
         hr = self.get_cached_hr() or 73
         self._update_cache(hr)
-        return Metrics(heart_rate_bpm=hr, steps=0)
+    return Metrics(heart_rate_bpm=hr, steps=0)
 
     async def _refresh(self):
         if httpx is None or not self.refresh_token:
@@ -171,6 +173,38 @@ class FitbitClient:
                     logger.warning("Fitbit refresh failed: {} {}", r.status_code, r.text[:200])
         except Exception as exc:
             logger.warning("Fitbit refresh exception: {}", exc)
+
+    async def _get_daily_steps(self, headers: dict) -> int:
+        """Fetch daily steps using Fitbit activities/steps endpoint.
+
+        Mirrors the tutorial's example endpoint usage but leverages stored OAuth tokens.
+        Returns 0 on error.
+        """
+        if httpx is None or not self.access_token:
+            return 0
+        url = "https://api.fitbit.com/1/user/-/activities/steps/date/today/1d.json"
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.get(url, headers=headers)
+                if r.status_code == 401:
+                    await self._refresh()
+                    new_headers = {"Authorization": f"Bearer {self.access_token}"}
+                    r = await client.get(url, headers=new_headers)
+                if r.status_code >= 400:
+                    logger.warning("Steps fetch failed: {} {}", r.status_code, r.text[:200])
+                    return 0
+                body = r.json()
+                # body["activities-steps"] -> list of {dateTime, value}
+                arr = body.get("activities-steps") if isinstance(body, dict) else None
+                if isinstance(arr, list) and arr:
+                    try:
+                        return int(arr[-1].get("value", 0))
+                    except Exception:
+                        return 0
+                return 0
+        except Exception as exc:
+            logger.warning("Steps fetch exception: {}", exc)
+            return 0
 
     async def polling_loop(self, stop_event: asyncio.Event):
         interval = int(self.settings.fitbit_poll_interval)
