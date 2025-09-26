@@ -130,7 +130,7 @@ class FitbitClient:
         # Fallback
         hr = self.get_cached_hr() or 73
         self._update_cache(hr)
-    return Metrics(heart_rate_bpm=hr, steps=0)
+        return Metrics(heart_rate_bpm=hr, steps=0)
 
     async def _refresh(self):
         if httpx is None or not self.refresh_token:
