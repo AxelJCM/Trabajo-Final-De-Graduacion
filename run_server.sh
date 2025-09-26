@@ -4,12 +4,29 @@ set -euo pipefail
 # Move to repo root, then into embedded backend folder
 cd "$(dirname "$0")/embedded"
 
-# Load .env if present
+# Load .env if present (robust to CRLF and BOM, no 'source' to avoid syntax errors)
 if [ -f .env ]; then
-  set -a
-  # shellcheck disable=SC1091
-  . ./.env
-  set +a
+  echo "[run_server] Loading embedded/.env"
+  i=0
+  while IFS= read -r line || [ -n "$line" ]; do
+    i=$((i+1))
+    # strip CR (Windows line endings)
+    line=${line%$'\r'}
+    # strip UTF-8 BOM on first line if present
+    if [ $i -eq 1 ] && printf '%s' "$line" | head -c 3 | grep -q "$(printf '\xEF\xBB\xBF')"; then
+      line=$(printf '%s' "$line" | sed '1s/^\xEF\xBB\xBF//')
+    fi
+    # skip blanks/comments
+    case "$line" in
+      ''|\#*) continue ;;
+    esac
+    # only export KEY=VALUE lines with a valid variable name
+    if [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
+      export "$line"
+    else
+      echo "[run_server] Skipping invalid line $i in .env: $line" >&2
+    fi
+  done < .env
 fi
 
 # Performance-friendly defaults for Raspberry Pi
