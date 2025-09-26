@@ -41,8 +41,8 @@ class FitbitClient:
         self.access_token = access_token
         self.refresh_token = refresh_token
         self.expires_at_utc = expires_at_utc
-    self._last_sample: Optional[Tuple[int, datetime]] = None  # (hr, ts)
-    self._last_steps: Optional[Tuple[int, datetime]] = None   # (steps, ts)
+        self._last_sample: Optional[Tuple[int, datetime]] = None  # (hr, ts)
+        self._last_steps: Optional[Tuple[int, datetime]] = None   # (steps, ts)
 
         if not access_token:
             db = SessionLocal()
@@ -138,11 +138,11 @@ class FitbitClient:
                 delay *= 2
 
         # Fallback
-    hr = self.get_cached_hr() or 73
-    steps = self.get_cached_steps() or 0
-    self._update_cache(hr)
-    self._update_steps_cache(steps)
-    return Metrics(heart_rate_bpm=hr, steps=steps)
+        hr = self.get_cached_hr() or 73
+        steps = self.get_cached_steps() or 0
+        self._update_cache(hr)
+        self._update_steps_cache(steps)
+        return Metrics(heart_rate_bpm=hr, steps=steps)
 
     async def _refresh(self):
         if httpx is None or not self.refresh_token:
