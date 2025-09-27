@@ -57,6 +57,14 @@ if [ -n "${FITBIT_CLIENT_ID:-}" ]; then
 else
   echo "[run_server] WARNING: FITBIT_CLIENT_ID is NOT set. Fitbit login will show 'setup required'." >&2
 fi
+if [ -n "${FITBIT_CLIENT_SECRET:-}" ]; then
+  echo "[run_server] FITBIT_CLIENT_SECRET is set."
+else
+  echo "[run_server] WARNING: FITBIT_CLIENT_SECRET is NOT set. Token exchange will fail with 401 invalid_client." >&2
+fi
+if [ -n "${FITBIT_REDIRECT_URI:-}" ]; then
+  echo "[run_server] FITBIT_REDIRECT_URI=${FITBIT_REDIRECT_URI}"
+fi
 
 # Run without --reload on Raspberry Pi to avoid duplicate camera in reloader
 exec uvicorn app.api.main:app --host 0.0.0.0 --port "${API_PORT:-8000}"

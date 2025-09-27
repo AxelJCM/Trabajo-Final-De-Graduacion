@@ -93,7 +93,10 @@ def fitbit_callback(code: str, state: str | None = None, db: Session = Depends(g
             data=data,
             timeout=10,
         )
-        r.raise_for_status()
+        if r.status_code >= 400:
+            # Return more details to help diagnose (invalid_client, invalid_grant, redirect mismatch, etc.)
+            logger.error("Fitbit callback token error: {} {}", r.status_code, r.text[:500])
+            return {"success": False, "status": r.status_code, "body": r.text}
         payload = r.json()
         save_tokens(
             db,
@@ -123,6 +126,7 @@ def fitbit_refresh(db: Session = Depends(get_db)) -> dict:
     data = {
         "grant_type": "refresh_token",
         "refresh_token": tokens.refresh_token,
+        "client_id": s.fitbit_client_id,
     }
     try:
         r = requests.post(
@@ -134,7 +138,9 @@ def fitbit_refresh(db: Session = Depends(get_db)) -> dict:
             data=data,
             timeout=10,
         )
-        r.raise_for_status()
+        if r.status_code >= 400:
+            logger.error("Fitbit refresh token error: {} {}", r.status_code, r.text[:500])
+            return {"success": False, "status": r.status_code, "body": r.text}
         payload = r.json()
         save_tokens(
             db,
