@@ -94,23 +94,23 @@ def fitbit_callback(code: str, state: str | None = None, db: Session = Depends(g
             data=data,
             timeout=10,
         )
-                if r.status_code >= 400:
-                        # Return more details to help diagnose (invalid_client, invalid_grant, redirect mismatch, etc.)
-                        logger.error("Fitbit callback token error: {} {}", r.status_code, r.text[:500])
-                        body_safe = (r.text or "").replace("<", "&lt;").replace(">", "&gt;")
-                        html = f"""
-                        <h3>Fitbit: token exchange failed</h3>
-                        <p>Status: {r.status_code}</p>
-                        <pre style='white-space:pre-wrap'>{body_safe[:2000]}</pre>
-                        <p>Tips:
-                            <ul>
-                                <li>Verifica que la Redirect URI registrada en Fitbit coincida exactamente con esta: <code>{redirect_uri}</code></li>
-                                <li>Comprueba FITBIT_CLIENT_ID/FITBIT_CLIENT_SECRET en embedded/.env</li>
-                            </ul>
-                        </p>
-                        <p><a href='/debug/view'>Volver al stream</a></p>
-                        """
-                        return HTMLResponse(html, status_code=400)
+        if r.status_code >= 400:
+            # Return more details to help diagnose (invalid_client, invalid_grant, redirect mismatch, etc.)
+            logger.error("Fitbit callback token error: {} {}", r.status_code, r.text[:500])
+            body_safe = (r.text or "").replace("<", "&lt;").replace(">", "&gt;")
+            html = f"""
+            <h3>Fitbit: token exchange failed</h3>
+            <p>Status: {r.status_code}</p>
+            <pre style='white-space:pre-wrap'>{body_safe[:2000]}</pre>
+            <p>Tips:
+              <ul>
+                <li>Verifica que la Redirect URI registrada en Fitbit coincida exactamente con esta: <code>{redirect_uri}</code></li>
+                <li>Comprueba FITBIT_CLIENT_ID/FITBIT_CLIENT_SECRET en embedded/.env</li>
+              </ul>
+            </p>
+            <p><a href='/debug/view'>Volver al stream</a></p>
+            """
+            return HTMLResponse(html, status_code=400)
         payload = r.json()
         save_tokens(
             db,
@@ -122,16 +122,16 @@ def fitbit_callback(code: str, state: str | None = None, db: Session = Depends(g
             token_type=payload.get("token_type"),
         )
         logger.info("Fitbit tokens saved")
-                # Redirect to a friendly page instead of raw JSON
-                return RedirectResponse(url="/debug/view?fitbit=connected", status_code=302)
+        # Redirect to a friendly page instead of raw JSON
+        return RedirectResponse(url="/debug/view?fitbit=connected", status_code=302)
     except Exception as exc:  # pragma: no cover
         logger.error("Fitbit callback error: {}", exc)
-                html = f"""
-                <h3>Fitbit: unexpected error</h3>
-                <pre>{str(exc)}</pre>
-                <p><a href='/debug/view'>Volver al stream</a></p>
-                """
-                return HTMLResponse(html, status_code=500)
+        html = f"""
+        <h3>Fitbit: unexpected error</h3>
+        <pre>{str(exc)}</pre>
+        <p><a href='/debug/view'>Volver al stream</a></p>
+        """
+        return HTMLResponse(html, status_code=500)
 
 
 @router.post("/auth/fitbit/refresh")
