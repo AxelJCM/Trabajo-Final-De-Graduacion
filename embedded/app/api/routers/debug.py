@@ -213,9 +213,14 @@ async def view() -> HTMLResponse:
                 .wrap{display:flex;flex-direction:column;align-items:center;gap:12px;padding:12px}
                 img{max-width:100%;height:auto;border:1px solid #333}
                 a{color:#8ab4f8}
+                .banner{display:none;position:fixed;top:8px;left:50%;transform:translateX(-50%);padding:10px 16px;border-radius:6px;font-weight:600;z-index:1000}
+                .ok{background:#1b5e20;color:#c8e6c9;border:1px solid #2e7d32}
+                .info{background:#263238;color:#cfd8dc;border:1px solid #546e7a}
+                .err{background:#b71c1c;color:#ffebee;border:1px solid #ef5350}
                 .toolbar{display:flex;gap:12px;align-items:center}
                 .btn{background:#1976d2;color:#fff;border:none;padding:8px 12px;border-radius:4px;cursor:pointer}
                 .btn:hover{background:#1565c0}
+            <div id="banner" class="banner info">Procesando…</div>
                 .status{font-weight:600}
             </style>
         </head>
@@ -260,6 +265,30 @@ async def view() -> HTMLResponse:
                     const elr = document.getElementById('redirVal');
                     if(elr) elr.textContent = redirect;
                 }catch(e){}
+                // Banner helpers
+                function showBanner(msg, kind){
+                    const b = document.getElementById('banner');
+                    if(!b) return;
+                    b.textContent = msg;
+                    b.className = 'banner ' + (kind||'info');
+                    b.style.display = 'block';
+                }
+                // Auto-forward ?code from this view to the backend callback and show success once connected
+                (function(){
+                    const sp = new URLSearchParams(window.location.search);
+                    if (sp.has('fitbit') && sp.get('fitbit') === 'connected'){
+                        showBanner('Fitbit conectado', 'ok');
+                        setTimeout(()=>{ const b=document.getElementById('banner'); if(b) b.style.display='none'; }, 3000);
+                    }
+                    if (sp.has('code')){
+                        showBanner('Completando login de Fitbit…', 'info');
+                        const code = sp.get('code');
+                        const state = sp.get('state') || '';
+                        const qs = new URLSearchParams({ code });
+                        if(state) qs.set('state', state);
+                        window.location.replace('/auth/fitbit/callback?' + qs.toString());
+                    }
+                })();
             </script>
         </body>
         </html>

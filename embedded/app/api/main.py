@@ -10,6 +10,8 @@ This module wires sub-routers from domain modules and provides a health check.
 from __future__ import annotations
 
 from fastapi import FastAPI
+from fastapi.responses import RedirectResponse
+import urllib.parse
 from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
 from pathlib import Path
@@ -79,6 +81,21 @@ async def health() -> dict:
     """Return API health status."""
 
     return {"status": "ok"}
+
+
+@app.get("/")
+async def root(code: str | None = None, state: str | None = None):
+    """Catch OAuth redirects that mistakenly land on '/' and forward to callback,
+    otherwise send users to the debug view."""
+    if code:
+        # Preserve state if present
+        qp = [
+            ("code", code),
+        ]
+        if state:
+            qp.append(("state", state))
+        return RedirectResponse(url="/auth/fitbit/callback?" + urllib.parse.urlencode(qp), status_code=302)
+    return RedirectResponse(url="/debug/view", status_code=302)
 
 
 # Routers
