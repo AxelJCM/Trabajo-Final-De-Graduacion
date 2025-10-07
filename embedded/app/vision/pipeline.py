@@ -19,6 +19,7 @@ import os
 import time
 from dataclasses import dataclass
 from typing import List
+from collections import deque
 
 from loguru import logger
 
@@ -95,6 +96,48 @@ class PoseEstimator:
         self.squat_up_threshold = float(os.getenv("SQUAT_UP_DEG", "150"))
         self.squat_down_threshold = float(os.getenv("SQUAT_DOWN_DEG", "100"))
         self._init_video_and_model()
+        # Latency metrics (seconds per frame)
+        self._lat_samples: deque[float] = deque(maxlen=int(os.getenv("LAT_SAMPLES", "300")))
+        self._last_latency: float = 0.0
+
+    # --- Metrics helpers ---
+    def _record_latency(self, dt: float) -> None:
+        try:
+            self._last_latency = float(dt)
+            self._lat_samples.append(float(dt))
+        except Exception:
+            pass
+
+    def get_latency_samples_count(self) -> int:
+        return len(self._lat_samples)
+
+    def get_latency_p50_p95_ms(self) -> tuple[float, float]:
+        if not self._lat_samples:
+            return (0.0, 0.0)
+        vals = sorted(self._lat_samples)
+        n = len(vals)
+        def percentile(p: float) -> float:
+            # p in [0,100]
+            if n == 1:
+                return vals[0]
+            k = (p/100.0) * (n - 1)
+            f = int(k)
+            c = min(f + 1, n - 1)
+            if f == c:
+                return vals[f]
+            return vals[f] + (vals[c] - vals[f]) * (k - f)
+        p50 = percentile(50.0) * 1000.0
+        p95 = percentile(95.0) * 1000.0
+        return (p50, p95)
+
+    def get_fps_avg(self) -> float:
+        if not self._lat_samples:
+            return 0.0
+        # Average of instantaneous FPS values (harmonic alternative would be n/sum(dt))
+        try:
+            return sum(1.0/max(1e-6, dt) for dt in self._lat_samples) / len(self._lat_samples)
+        except Exception:
+            return 0.0
 
     def _init_video_and_model(self):
         if self.vision_mock:
@@ -211,9 +254,12 @@ class PoseEstimator:
         if not ok:
             return self._mock_output()
         img = frame
+        t_pre0 = time.time()
         img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         result = self.pose.process(img_rgb)
-        fps = 1.0 / max(1e-6, (time.time() - t0))
+        dt = time.time() - t0
+        fps = 1.0 / max(1e-6, dt)
+        self._record_latency(dt)
 
         if not result.pose_landmarks:
             out = self._mock_output()

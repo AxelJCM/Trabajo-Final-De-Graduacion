@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Response, Request
-from fastapi.responses import StreamingResponse, PlainTextResponse, HTMLResponse
+from fastapi.responses import StreamingResponse, PlainTextResponse, HTMLResponse, JSONResponse
 from typing import Iterator
 from pathlib import Path
 import time
@@ -69,7 +69,14 @@ def mjpeg_frames(overlay: bool = True, app_state=None) -> Iterator[bytes]:
                 try:
                     h, w = frame.shape[:2]
                     img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    t0 = time.time()
                     result = pose_estimator.pose.process(img_rgb)
+                    dt = time.time() - t0
+                    # Record latency sample for metrics
+                    try:
+                        pose_estimator._record_latency(dt)  # type: ignore[attr-defined]
+                    except Exception:
+                        pass
                     if result and result.pose_landmarks:
                         # Collect normalized landmarks into pixel dict
                         pts = {}
@@ -91,6 +98,15 @@ def mjpeg_frames(overlay: bool = True, app_state=None) -> Iterator[bytes]:
                         hud = f"{pose_estimator.exercise} | reps: {pose_estimator.rep_count} | phase: {pose_estimator.phase}"
                         cv2.rectangle(frame, (10, 10), (10 + 420, 40), (0, 0, 0), -1)
                         cv2.putText(frame, hud, (18, 33), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2, cv2.LINE_AA)
+                        # Overlay simple performance metrics
+                        try:
+                            p50, p95 = pose_estimator.get_latency_p50_p95_ms()
+                            fps_avg = pose_estimator.get_fps_avg()
+                            overlay_txt = f"fps:{fps_avg:.1f} p50:{p50:.0f}ms p95:{p95:.0f}ms"
+                            cv2.putText(frame, overlay_txt, (18, 58), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255), 2, cv2.LINE_AA)
+                            cv2.putText(frame, overlay_txt, (18, 58), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,0), 1, cv2.LINE_AA)
+                        except Exception:
+                            pass
                 except Exception:
                     # Keep streaming even if pose inference fails
                     pass
@@ -249,6 +265,18 @@ async def view() -> HTMLResponse:
         </html>
         """
     return HTMLResponse(content=html)
+
+
+@router.get("/debug/metrics")
+async def metrics() -> JSONResponse:
+    p50, p95 = pose_estimator.get_latency_p50_p95_ms()
+    last_dt = getattr(pose_estimator, "_last_latency", 0.0)
+    payload = {
+        "latency_ms": {"p50": round(p50, 2), "p95": round(p95, 2)},
+        "fps": {"instant": round(1.0/max(1e-6, last_dt), 2) if last_dt else 0.0, "avg": round(pose_estimator.get_fps_avg(), 2)},
+        "samples": pose_estimator.get_latency_samples_count(),
+    }
+    return JSONResponse(content=payload)
 
 
 @router.get("/debug/diag")
