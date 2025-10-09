@@ -134,6 +134,9 @@ def fitbit_callback(code: str, state: str | None = None, db: Session = Depends(g
         # Confidential client: send Basic auth with client secret
         auth_hdr = base64.b64encode(f"{cid}:{csec}".encode()).decode()
         headers["Authorization"] = f"Basic {auth_hdr}"
+        if csec:
+            # Also include in body for compatibility with some client samples
+            data["client_secret"] = csec
     try:
         r = requests.post(
             token_url,
