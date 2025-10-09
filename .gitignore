@@ -6,12 +6,7 @@ __pycache__/
 venv/
 .env
 
-# Node/React Native/Expo
-mobile/node_modules/
-mobile/.expo/
-mobile/.expo-shared/
-mobile/dist/
-mobile/coverage/
+
 
 # OS & IDE
 .DS_Store

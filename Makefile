@@ -10,8 +10,7 @@ run:
 test:
 	. .venv/bin/activate && pytest -q embedded/tests
 
-mobile:
-	cd mobile && npm install && npm start
+
 
 lint:
 	@echo "Linting placeholder (add flake8/eslint configs as needed)"

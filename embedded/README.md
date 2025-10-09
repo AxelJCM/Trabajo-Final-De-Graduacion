@@ -22,6 +22,7 @@ python -m venv .venv; .\.venv\Scripts\Activate.ps1; pip install -r embedded/requ
 - GET /health
 - POST /posture
 - POST /biometrics
+- GET /biometrics/last
 - POST /config
 - POST /voice/test
 

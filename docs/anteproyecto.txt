@@ -73,7 +73,7 @@ físico del usuario o a la corrección de errores posturales durante la activida
 Con base en estas observaciones, este proyecto propone el desarrollo de un espejo
 interactivo de bienestar y ejercicio personalizado. A través de la integración de
 tecnologías como visión por computadora, datos biométricos provenientes de un reloj
-inteligente, asistentes de voz y una aplicación móvil complementaria, se plantea un sistema
+inteligente y asistentes de voz, se plantea un sistema
 capaz de ofrecer una experiencia más completa y dinámica. El dispositivo está pensado
 para funcionar como un entrenador virtual dentro del hogar, guiando al usuario mediante
 rutinas adaptadas a sus objetivos personales (como tonificación, relajación o pérdida de
@@ -132,8 +132,8 @@ personalizar las rutinas de ejercicio y mejorar la interacción con el usuario.
 auditivas (por voz) para facilitar el uso del sistema por parte del usuario final,
 considerando principios de accesibilidad y facilidad de uso.
 • Aplicaciones en el área de Internet de las Cosas (IoT): mediante conectividad entre
-el espejo y una aplicación móvil que permita sincronización de datos, seguimiento
-del rendimiento y configuración remota.
+el espejo y dispositivos externos (por ejemplo, un reloj inteligente) para sincronización
+de datos, seguimiento del rendimiento y configuración local.
 La combinación de estas áreas proporciona el marco técnico necesario para el desarrollo
 del proyecto y asegura que su implementación está alineada con las competencias
 profesionales adquiridas a lo largo de la carrera.
@@ -204,8 +204,7 @@ Objetivo General:
 Desarrollar un sistema embebido tipo espejo inteligente que permita al usuario realizar
 rutinas de ejercicio desde su hogar con retroalimentación personalizada, mediante el
 análisis de postura, interacción por voz y monitoreo de datos fisiológicos provenientes de
-un reloj inteligente, utilizando visión por computadora, tecnologías de conectividad y una
-aplicación complementaria móvil.
+un reloj inteligente, utilizando visión por computadora y tecnologías de conectividad.
 Objetivos específicos:
 • Diseñar un módulo de análisis de postura para detectar en tiempo real la posición
 corporal del usuario, con el fin de brindar correcciones visuales durante la ejecución
@@ -223,10 +222,7 @@ inteligente.
 dispositivo sin contacto físico, con el objetivo de facilitar la interacción durante el
 entrenamiento, utilizando bibliotecas compatibles con hardware embebido como
 Vosk o Google Speech API.
-• Construir una aplicación móvil complementaria que visualice el progreso del
-usuario, gestione la configuración del sistema y aplique técnicas de gamificación,
-para fomentar la adherencia a las rutinas y la motivación constante, empleando
-herramientas de desarrollo multiplataforma como Flutter o React Native.
+
 c. Impactos del proyecto y sus resultados esperados
 El desarrollo del espejo interactivo de bienestar y ejercicio personalizado tiene el potencial
 de generar impactos positivos en diversas dimensiones, tanto técnicas como sociales y
@@ -273,7 +269,7 @@ complejidad que permite demostrar habilidades en diseño embebido, programación
 
 
 de interfaces, procesamiento de imágenes, comunicación con dispositivos externos
-y desarrollo móvil.
+y comunicación con dispositivos externos.
 • Escalabilidad: la arquitectura modular permite futuras mejoras como integración
 con servicios en la nube, mayor personalización o incorporación de ejercicios para
 públicos específicos.
@@ -310,7 +306,7 @@ Resultados esperados
 • Integración exitosa con un reloj inteligente comercial para obtener datos fisiológicos.
 • Interfaz de entrenador virtual con rutinas personalizadas.
 • Sistema de control por voz operativo y eficaz.
-• Aplicación móvil conectada para seguimiento y motivación del usuario.
+
 • Validación del sistema con usuarios en condiciones controladas.
 d. Supuestos y limitaciones
 Supuestos:
@@ -324,10 +320,10 @@ como un Mi Band, Fitbit o smartwatch similar que permita acceso a métricas bás
 mediante API o sincronización de datos.
 • Disponibilidad de conectividad local (Wi-Fi o Bluetooth): se da por hecho que el
 entorno de uso tendrá acceso a conexión inalámbrica para la comunicación entre el
-espejo y el reloj, así como con la aplicación móvil.
+espejo y el reloj inteligente.
 • Acceso a bibliotecas y herramientas de software: se asume que las tecnologías
-necesarias para el desarrollo del sistema (OpenCV, TensorFlow, Vosk, Flutter, etc.)
-están disponibles de forma gratuita y compatible con el entorno de trabajo.
+necesarias para el desarrollo del sistema (OpenCV, TensorFlow, Vosk, etc.)
+están disponibles de forma gratuita y compatibles con el entorno de trabajo.
 • Acompañamiento académico: se parte de que el estudiante contará con el
 seguimiento de un profesor guía y acceso a recursos institucionales como
 laboratorios o asesoría técnica básica.
@@ -400,13 +396,7 @@ considerar alternativas compatibles.
 Retrasos en el cronograma por tareas Establecer un cronograma flexible con
 interdependientes o dificultades márgenes de seguridad; dividir entregables por
 técnicas inesperadas módulos independientes.
-Limitar el alcance de la app a funcionalidades
-Dificultad en la implementación de la
-esenciales (visualización de progreso,
-aplicación móvil y sincronización con el
-configuración básica); priorizar estabilidad
-sistema
-sobre estética.
+
 Falta de conocimientos especializados Establecer colaboración con expertos de
 en biomecánica para validar los carreras afines para observación directa,
 resultados del análisis de postura análisis comparativo y retroalimentación
@@ -461,15 +451,11 @@ o Uso de datos fisiológicos para modificar la dificultad del entrenamiento.
 
 o Lógica para generar y presentar rutinas adaptadas.
 o Integración de comandos de voz mediante Vosk o Google Speech API.
-6. Diseño e implementación de la aplicación móvil
-o Aplicación multiplataforma con funciones de monitoreo, gamificación y
-configuración.
-o Sincronización con el sistema embebido.
-7. Pruebas funcionales y ajustes
+6. Pruebas funcionales y ajustes
 o Validación de los módulos.
 o Pruebas internas en un entorno controlado.
 o Ajustes de rendimiento y experiencia de usuario.
-8. Documentación técnica y entrega final
+7. Documentación técnica y entrega final
 o Redacción del informe del TFG.
 o Documentación del código y manual de usuario.
 Figura 1: Esquema del proceso general del proyecto
@@ -513,13 +499,7 @@ voz que permita comandos básicos- funcional ruido; pruebas de
 controlar el Vincular acciones a precisión de
 dispositivo sin comandos comandos
 contacto físico. reconocidos
-Construir una - Diseñar interfaz de Aplicación Flutter o React Pruebas
-aplicación móvil usuario- móvil Native, funcionales de
-complementaria Sincronizar datos funcional en Firebase o sincronización y
-que visualice el con el espejo- Android o SQLite almacenamiento;
-progreso del Implementar lógica IOS revisión de interfaz
-usuario y aplique de logros o metas por usuarios
-gamificación.
+
 15
 
 --- Página 16 ---
@@ -565,18 +545,12 @@ o Programación de rutinas adaptativas.
 o Implementación del motor de comandos de voz.
 • Entregables: Módulos funcionales individuales (postura, biometría, voz) validados
 en entorno local.
-Fase 4: Desarrollo de aplicación móvil complementaria (Segunda mitad de octubre
-2025)
-• 4.1 Diseño de la interfaz de usuario móvil.
-• 4.2 Sincronización de datos con el sistema embebido.
-• 4.3 Implementación de lógica de seguimiento, gamificación y configuración.
-• Entregable: Aplicación funcional conectada al sistema embebido.
-Fase 5: Validación, pruebas funcionales e integración del sistema (Noviembre 2025)
+Fase 4: Validación, pruebas funcionales e integración del sistema (Noviembre 2025)
 • 5.1 Pruebas unitarias por módulo.
 • 5.2 Pruebas de integración y funcionamiento global del sistema.
 • 5.3 Ajustes de rendimiento, usabilidad y estabilidad.
 • Entregable: Prototipo funcional completo, con validación en entorno simulado.
-Fase 6: Documentación y cierre del proyecto (Finales de noviembre – inicios de
+Fase 5: Documentación y cierre del proyecto (Finales de noviembre – inicios de
 diciembre 2025)
 • 6.1 Redacción del informe final del Trabajo Final de Graduación.
 • 6.2 Elaboración de documentación técnica del sistema.

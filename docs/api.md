@@ -6,7 +6,6 @@ All responses follow { success, data, error }.
 - POST /posture
 - POST /biometrics
 - GET /biometrics/last
-- POST /routine
 - GET /config
 - POST /config
 - GET /auth/fitbit/login
