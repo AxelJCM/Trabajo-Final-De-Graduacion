@@ -145,7 +145,7 @@ def fitbit_callback(code: str, state: str | None = None, db: Session = Depends(g
         # Do NOT send Authorization header for public client PKCE
     else:
         # Confidential client: prefer HTTP Basic auth; optionally include client_secret in body
-    auth_mode = (auth_mode_override or os.getenv("FITBIT_AUTH_MODE", "basic")).lower()  # basic | body | both
+        auth_mode = (auth_mode_override or os.getenv("FITBIT_AUTH_MODE", "basic")).lower()  # basic | body | both
         if not csec:
             logger.error("Fitbit confidential flow without client_secret configured")
             html = (
