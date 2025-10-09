@@ -15,7 +15,7 @@ import secrets
 
 import requests
 from requests.auth import HTTPBasicAuth
-from fastapi import APIRouter, Response, Depends, Request
+from fastapi import APIRouter, Response, Depends, Request, Header, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from loguru import logger
 
@@ -23,6 +23,7 @@ from app.core.config import get_settings
 from sqlalchemy.orm import Session
 from app.core.db import get_db, Base, engine
 from app.core.dal import save_tokens, get_tokens
+import asyncio
 
 router = APIRouter()
 Base.metadata.create_all(bind=engine)
@@ -309,6 +310,62 @@ def fitbit_debug_config(request: Request) -> dict:
         "fitbit_auth_mode": auth_mode,
         "redirect_uri": redirect_uri,
     }
+
+
+@router.post("/auth/fitbit/seed")
+def fitbit_seed(
+    request: Request,
+    db: Session = Depends(get_db),
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+    body: dict | None = None,
+) -> dict:
+    """Seed Fitbit tokens (pre-authorization) and start polling if not running.
+
+    Security: Requires X-API-Key header matching settings.api_key (if configured).
+
+    Body JSON schema (minimal):
+    - access_token: string
+    - refresh_token: string
+    - expires_in: int (seconds)
+    - scope: optional string
+    - token_type: optional string
+    """
+    s = get_settings()
+    if s.api_key and x_api_key != s.api_key:
+        raise HTTPException(status_code=401, detail="invalid_api_key")
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="invalid_body")
+    access_token = body.get("access_token")
+    refresh_token = body.get("refresh_token")
+    expires_in = body.get("expires_in", 28800)
+    scope = body.get("scope")
+    token_type = body.get("token_type")
+    if not access_token or not refresh_token:
+        raise HTTPException(status_code=400, detail="missing_tokens")
+    save_tokens(
+        db,
+        access_token,
+        refresh_token,
+        int(expires_in),
+        provider="fitbit",
+        scope=scope,
+        token_type=token_type,
+    )
+    # Start polling loop if not already running
+    app = request.app
+    if not getattr(app.state, "_fitbit_task", None):
+        try:
+            from app.biometrics.fitbit_client import FitbitClient
+            stop_event = asyncio.Event()
+            client = FitbitClient()
+            task = asyncio.create_task(client.polling_loop(stop_event))
+            app.state._fitbit_task = task
+            app.state._fitbit_stop = stop_event
+            app.state.fitbit_client = client
+        except Exception as exc:
+            logger.error("Failed to start Fitbit polling after seed: {}", exc)
+            return {"seeded": True, "polling_started": False, "error": str(exc)}
+    return {"seeded": True, "polling_started": True}
 
 
 @router.get("/auth/fitbit/status")

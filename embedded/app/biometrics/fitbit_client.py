@@ -148,18 +148,28 @@ class FitbitClient:
         if httpx is None or not self.refresh_token:
             return
         url = "https://api.fitbit.com/oauth2/token"
+        # Sanitize env values
+        cid = (self.settings.fitbit_client_id or "").strip().strip('"').strip("'")
+        csec = (self.settings.fitbit_client_secret or "").strip().strip('"').strip("'")
         data = {
             "grant_type": "refresh_token",
             "refresh_token": self.refresh_token,
-            "client_id": self.settings.fitbit_client_id,
-            "client_secret": self.settings.fitbit_client_secret,
+            "client_id": cid,
         }
+        if csec:
+            data["client_secret"] = csec
         try:
             async with httpx.AsyncClient(timeout=10) as client:
+                headers = {"Content-Type": "application/x-www-form-urlencoded"}
+                auth = None
+                if csec:
+                    # Prefer Basic auth as in confidential flow
+                    auth = httpx.BasicAuth(cid, csec)
                 r = await client.post(
                     url,
                     data=data,
-                    headers={"Content-Type": "application/x-www-form-urlencoded"},
+                    headers=headers,
+                    auth=auth,
                 )
                 if r.status_code == 200:
                     body = r.json()
