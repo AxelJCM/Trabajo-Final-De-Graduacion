@@ -68,7 +68,10 @@ def fitbit_login(request: Request, redirect: str | None = None) -> Response:
 def fitbit_callback(code: str, state: str | None = None, db: Session = Depends(get_db)):
     s = get_settings()
     token_url = "https://api.fitbit.com/oauth2/token"
-    auth_hdr = base64.b64encode(f"{s.fitbit_client_id}:{s.fitbit_client_secret}".encode()).decode()
+    # Sanitize env values to avoid stray quotes/whitespace issues from .env
+    cid = (s.fitbit_client_id or "").strip().strip('"').strip("'")
+    csec = (s.fitbit_client_secret or "").strip().strip('"').strip("'")
+    auth_hdr = base64.b64encode(f"{cid}:{csec}".encode()).decode()
     # Use configured redirect by default; allow override if provided in state
     redirect_uri = s.fitbit_redirect_uri
     if state:
@@ -79,7 +82,7 @@ def fitbit_callback(code: str, state: str | None = None, db: Session = Depends(g
         except Exception:
             pass
     data = {
-        "client_id": s.fitbit_client_id,
+        "client_id": cid,
         "grant_type": "authorization_code",
         "redirect_uri": redirect_uri,
         "code": code,
