@@ -316,6 +316,15 @@ async def diag(request: Request) -> dict:
         tok = get_tokens(db)
         camera_opened = bool(pose_estimator.cap is not None)
         pose_ready = bool(pose_estimator.pose is not None)
+        # Basic DNS resolution check for Fitbit API
+        import socket
+        dns_ok = False
+        fitbit_ip = None
+        try:
+            fitbit_ip = socket.gethostbyname("api.fitbit.com")
+            dns_ok = True if fitbit_ip else False
+        except Exception:
+            dns_ok = False
         return {
             "camera": {
                 "opened": camera_opened,
@@ -334,6 +343,11 @@ async def diag(request: Request) -> dict:
                 "tokens_present": bool(tok),
                 "app_state_client": bool(getattr(request.app.state, "fitbit_client", None)),
             },
+            "network": {
+                "dns_resolves_api_fitbit_com": dns_ok,
+                "api_fitbit_ip": fitbit_ip,
+                "note": "If false, fix DNS on the Pi (systemd-resolved/dhcpcd) and ensure Internet access."
+            }
         }
     finally:
         db.close()
