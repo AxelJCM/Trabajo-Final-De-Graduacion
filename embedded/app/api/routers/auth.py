@@ -9,6 +9,9 @@ from __future__ import annotations
 import base64
 import json
 import urllib.parse
+import os
+import hashlib
+import secrets
 
 import requests
 from fastapi import APIRouter, Response, Depends, Request
@@ -27,13 +30,29 @@ Base.metadata.create_all(bind=engine)
 @router.get("/auth/fitbit/login")
 def fitbit_login(request: Request, redirect: str | None = None) -> Response:
     s = get_settings()
-    client_id = s.fitbit_client_id
+    # Sanitize env values
+    client_id = (s.fitbit_client_id or "").strip().strip('"').strip("'")
+    client_secret = (s.fitbit_client_secret or "").strip().strip('"').strip("'")
     redirect_uri = s.fitbit_redirect_uri
     scope = "heartrate profile activity"
     state_obj = {}
+    # Enable PKCE if no client_secret is configured or explicitly requested
+    use_pkce = (not client_secret) or (os.getenv("FITBIT_USE_PKCE", "0") in {"1","true","TRUE","yes","on"})
+    code_verifier = None
+    code_challenge = None
+    if use_pkce:
+        # RFC 7636: code_verifier 43-128 chars, unreserved. We'll use base64url of 64 random bytes, stripped '='
+        rnd = secrets.token_urlsafe(64)
+        code_verifier = rnd[:128]
+        # S256 challenge
+        digest = hashlib.sha256(code_verifier.encode()).digest()
+        code_challenge = base64.urlsafe_b64encode(digest).decode().rstrip('=')
     if redirect:
         state_obj["r"] = redirect
         redirect_uri = redirect
+    if code_verifier:
+        state_obj["cv"] = code_verifier  # return via state for callback
+        state_obj["pk"] = True
     state = base64.urlsafe_b64encode(json.dumps(state_obj).encode()).decode() if state_obj else None
     params = {
         "client_id": client_id,
@@ -41,6 +60,9 @@ def fitbit_login(request: Request, redirect: str | None = None) -> Response:
         "scope": scope,
         "redirect_uri": redirect_uri,
     }
+    if code_challenge:
+        params["code_challenge"] = code_challenge
+        params["code_challenge_method"] = "S256"
     if state:
         params["state"] = state
     # Fallback: if no redirect provided and no configured redirect, infer from request
@@ -71,7 +93,8 @@ def fitbit_callback(code: str, state: str | None = None, db: Session = Depends(g
     # Sanitize env values to avoid stray quotes/whitespace issues from .env
     cid = (s.fitbit_client_id or "").strip().strip('"').strip("'")
     csec = (s.fitbit_client_secret or "").strip().strip('"').strip("'")
-    auth_hdr = base64.b64encode(f"{cid}:{csec}".encode()).decode()
+    use_pkce = False
+    code_verifier = None
     # Use configured redirect by default; allow override if provided in state
     redirect_uri = s.fitbit_redirect_uri
     if state:
@@ -79,6 +102,11 @@ def fitbit_callback(code: str, state: str | None = None, db: Session = Depends(g
             decoded = json.loads(base64.urlsafe_b64decode(state.encode()).decode())
             if isinstance(decoded, dict) and decoded.get("r"):
                 redirect_uri = str(decoded["r"])
+            if isinstance(decoded, dict) and decoded.get("cv"):
+                code_verifier = str(decoded.get("cv"))
+                use_pkce = True
+            if isinstance(decoded, dict) and decoded.get("pk"):
+                use_pkce = True
         except Exception:
             pass
     data = {
@@ -87,13 +115,29 @@ def fitbit_callback(code: str, state: str | None = None, db: Session = Depends(g
         "redirect_uri": redirect_uri,
         "code": code,
     }
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    if use_pkce:
+        if not code_verifier:
+            # As a fallback, allow env-provided verifier for testing (not recommended)
+            code_verifier = os.getenv("FITBIT_CODE_VERIFIER")
+        if not code_verifier:
+            body_safe = "Missing code_verifier for PKCE flow"
+            html = f"""
+            <h3>Fitbit: token exchange failed</h3>
+            <pre>{body_safe}</pre>
+            <p><a href='/debug/view'>Volver al stream</a></p>
+            """
+            return HTMLResponse(html, status_code=400)
+        data["code_verifier"] = code_verifier
+        # Do NOT send Authorization header for public client PKCE
+    else:
+        # Confidential client: send Basic auth with client secret
+        auth_hdr = base64.b64encode(f"{cid}:{csec}".encode()).decode()
+        headers["Authorization"] = f"Basic {auth_hdr}"
     try:
         r = requests.post(
             token_url,
-            headers={
-                "Authorization": f"Basic {auth_hdr}",
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
+            headers=headers,
             data=data,
             timeout=10,
         )
