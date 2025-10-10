@@ -40,7 +40,7 @@ class FitbitClient:
         self.settings = get_settings()
         self.access_token = access_token
         self.refresh_token = refresh_token
-        self.expires_at_utc = expires_at_utc
+        self.expires_at_utc = self._normalize_expiry(expires_at_utc)
         self._last_sample: Optional[Tuple[int, datetime]] = None  # (hr, ts)
         self._last_steps: Optional[Tuple[int, datetime]] = None   # (steps, ts)
 
@@ -53,13 +53,80 @@ class FitbitClient:
             if t:
                 self.access_token = t.access_token
                 self.refresh_token = t.refresh_token
-                self.expires_at_utc = t.expires_at_utc
+                self.expires_at_utc = self._normalize_expiry(getattr(t, "expires_at_utc", None))
 
     def get_cached_hr(self) -> Optional[int]:
         return self._last_sample[0] if self._last_sample else None
 
     def get_cached_steps(self) -> Optional[int]:
         return self._last_steps[0] if self._last_steps else None
+
+    @staticmethod
+    def _normalize_expiry(value: Optional[datetime]) -> Optional[datetime]:
+        """Convert stored expiry timestamps to timezone-aware UTC values."""
+        if value is None:
+            return None
+        if isinstance(value, str):
+            try:
+                # Accept ISO strings persisted by older builds
+                parsed = datetime.fromisoformat(value)
+            except ValueError:
+                return None
+            value = parsed
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
+    def _extract_hr(self, payload: object) -> Tuple[Optional[int], str]:
+        """Extract the latest HR sample from Fitbit response.
+
+        Returns (value, source) where source is 'intraday', 'summary', or 'none'.
+        """
+        if not isinstance(payload, dict):
+            return None, "none"
+
+        def _from_dataset(dataset: object) -> Optional[int]:
+            if isinstance(dataset, list) and dataset:
+                last = dataset[-1]
+                if isinstance(last, dict):
+                    try:
+                        return int(last.get("value", 0))
+                    except Exception:
+                        return None
+            return None
+
+        intraday = payload.get("activities-heart-intraday")
+        if isinstance(intraday, dict):
+            hr_val = _from_dataset(intraday.get("dataset"))
+            if hr_val:
+                return hr_val, "intraday"
+
+        activities = payload.get("activities-heart")
+        # Some responses (older mocks) used dict w/ dataset
+        if isinstance(activities, dict):
+            hr_val = _from_dataset(activities.get("dataset"))
+            if hr_val:
+                return hr_val, "intraday"
+        # Official summary: list with value.restingHeartRate
+        if isinstance(activities, list) and activities:
+            entry = activities[-1]
+            if isinstance(entry, dict):
+                value = entry.get("value")
+                if isinstance(value, dict):
+                    rhr = value.get("restingHeartRate")
+                    if isinstance(rhr, (int, float)) and rhr > 0:
+                        return int(rhr), "summary"
+                    # Last resort: pick highest zone a user spent time in
+                    zones = value.get("heartRateZones")
+                    if isinstance(zones, list):
+                        for zone in reversed(zones):
+                            if not isinstance(zone, dict):
+                                continue
+                            minutes = zone.get("minutes")
+                            bpm = zone.get("min")
+                            if isinstance(minutes, (int, float)) and minutes > 0 and isinstance(bpm, (int, float)):
+                                return int(bpm), "summary"
+        return None, "none"
 
     def _update_cache(self, hr: int):
         self._last_sample = (hr, datetime.now(timezone.utc))
@@ -77,7 +144,8 @@ class FitbitClient:
             return Metrics(heart_rate_bpm=hr, steps=steps)
 
         # Refresh if expired
-        if self.expires_at_utc and datetime.now(timezone.utc) >= self.expires_at_utc:
+        now_utc = datetime.now(timezone.utc)
+        if self.expires_at_utc and now_utc >= self.expires_at_utc:
             await self._refresh()
 
         # Intraday HR endpoint (prefer 1sec, fallback 1min)
@@ -111,22 +179,18 @@ class FitbitClient:
                     if resp.status_code >= 400:
                         raise RuntimeError(f"Fitbit error {resp.status_code}: {resp.text[:200]}")
                 body = resp.json()
-                series = None
-                # Typical: body["activities-heart-intraday"]["dataset"]
-                if isinstance(body, dict):
-                    intraday = body.get("activities-heart-intraday")
-                    if isinstance(intraday, dict):
-                        series = intraday.get("dataset")
-                    if not series:
-                        alt = body.get("activities-heart")
-                        if isinstance(alt, dict):
-                            series = alt.get("dataset")
-                if not series:
-                    raise RuntimeError("No intraday HR series found")
-                last = series[-1] if series else None
-                hr = int(last.get("value", 0)) if last else 0
-                if hr <= 0:
-                    hr = self.get_cached_hr() or 72
+                hr, source = self._extract_hr(body)
+                if hr is None or hr <= 0:
+                    cached = self.get_cached_hr()
+                    if cached is not None:
+                        hr = cached
+                    else:
+                        hr = 72
+                elif source == "summary":
+                    logger.warning(
+                        "Fitbit intraday series unavailable; using resting heart rate summary. "
+                        "Request intraday access in Fitbit Developer portal for live samples."
+                    )
                 self._update_cache(hr)
                 # Fetch daily steps similar to tutorial example
                 steps = await self._get_daily_steps(headers)
@@ -176,7 +240,9 @@ class FitbitClient:
                     self.access_token = body.get("access_token")
                     self.refresh_token = body.get("refresh_token", self.refresh_token)
                     expires_in = body.get("expires_in", 3600)
-                    self.expires_at_utc = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+                    self.expires_at_utc = self._normalize_expiry(
+                        datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+                    )
                     if self.access_token and self.refresh_token and expires_in:
                         db = SessionLocal()
                         try:

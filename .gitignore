@@ -15,7 +15,10 @@ Thumbs.db
 
 # Logs
 logs/
-*.log# Byte-compiled / optimized / DLL files
+*.log
+# Fitbit prototype tokens
+fitbit_prototype/tokens.json
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
 *$py.class

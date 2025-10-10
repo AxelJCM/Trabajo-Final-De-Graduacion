@@ -17,6 +17,7 @@ Fitbit OAuth:
 - Set redirect URI: `http://<pi_ip>:8000/auth/fitbit/callback`.
 - Update `.env` FITBIT_CLIENT_ID, FITBIT_CLIENT_SECRET, FITBIT_REDIRECT_URI.
 - Start server, open `http://<pi_ip>:8000/auth/fitbit/login` and complete consent.
+- Without the optional *Intraday Data* approval Fitbit only returns daily summaries (resting heart rate). Request Intraday access in the Fitbit developer portal if you need per-minute/second samples.
 - Open the Fitbit mobile app to force a sync, then call `/biometrics` or `/biometrics/last`.
 
 Testing endpoints:
