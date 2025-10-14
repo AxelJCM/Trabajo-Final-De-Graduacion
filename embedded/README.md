@@ -25,8 +25,16 @@ python -m venv .venv; .\.venv\Scripts\Activate.ps1; pip install -r embedded/requ
 - GET /biometrics/last
 - POST /config
 - POST /voice/test
+- POST /training/pose/sample
+- POST /training/voice/sample
 
 All responses use { success, data, error }.
+
+## Training data collection
+- Capture pose sample: `python scripts/collect_pose_sample.py sentadilla --notes "buen angulo"`
+- Registrar sinónimo de voz: `python scripts/add_voice_synonym.py "inicia cardio" start_routine`
+
+Pose samples se guardan en `embedded/app/data/training/pose/`, mientras que voz en `embedded/app/data/training/voice/`. Configura `USE_VOSK_OFFLINE=1` y `VOSK_MODEL_PATH` en `.env` después de descargar un modelo adecuado (por ejemplo `vosk-model-small-es-0.42`). 
 
 ## CLI fallback
 If GUI isn't available, run:

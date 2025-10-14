@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import asyncio
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from datetime import datetime, timezone, timedelta
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict, Any
+from collections import deque
 
 from loguru import logger
 
@@ -26,8 +27,19 @@ from app.core.dal import get_tokens as dal_get_tokens, save_tokens as dal_save_t
 
 @dataclass
 class Metrics:
+    """Container for Fitbit metrics along with provenance metadata."""
+
     heart_rate_bpm: int
     steps: int
+    timestamp_utc: datetime
+    heart_rate_source: str
+    steps_source: str
+    error: Optional[str] = None
+
+    def to_dict(self) -> dict[str, Any]:
+        d = asdict(self)
+        d["timestamp_utc"] = self.timestamp_utc.isoformat()
+        return d
 
 
 class FitbitClient:
@@ -41,8 +53,9 @@ class FitbitClient:
         self.access_token = access_token
         self.refresh_token = refresh_token
         self.expires_at_utc = self._normalize_expiry(expires_at_utc)
-        self._last_sample: Optional[Tuple[int, datetime]] = None  # (hr, ts)
-        self._last_steps: Optional[Tuple[int, datetime]] = None   # (steps, ts)
+        self._last_metrics: Optional[Metrics] = None
+        self._last_error: Optional[str] = None
+        self._history: deque[Metrics] = deque(maxlen=512)
 
         if not access_token:
             db = SessionLocal()
@@ -56,10 +69,13 @@ class FitbitClient:
                 self.expires_at_utc = self._normalize_expiry(getattr(t, "expires_at_utc", None))
 
     def get_cached_hr(self) -> Optional[int]:
-        return self._last_sample[0] if self._last_sample else None
+        return self._last_metrics.heart_rate_bpm if self._last_metrics else None
 
     def get_cached_steps(self) -> Optional[int]:
-        return self._last_steps[0] if self._last_steps else None
+        return self._last_metrics.steps if self._last_metrics else None
+
+    def get_cached_metrics(self) -> Optional[Metrics]:
+        return self._last_metrics
 
     @staticmethod
     def _normalize_expiry(value: Optional[datetime]) -> Optional[datetime]:
@@ -128,20 +144,60 @@ class FitbitClient:
                                 return int(bpm), "summary"
         return None, "none"
 
-    def _update_cache(self, hr: int):
-        self._last_sample = (hr, datetime.now(timezone.utc))
+    def _update_cache(
+        self,
+        *,
+        heart_rate_bpm: int,
+        steps: int,
+        heart_rate_source: str,
+        steps_source: str,
+        error: Optional[str],
+    ) -> Metrics:
+        metrics = Metrics(
+            heart_rate_bpm=heart_rate_bpm,
+            steps=steps,
+            timestamp_utc=datetime.now(timezone.utc),
+            heart_rate_source=heart_rate_source,
+            steps_source=steps_source,
+            error=error,
+        )
+        self._last_metrics = metrics
+        self._last_error = error
+        self._history.append(metrics)
+        return metrics
 
-    def _update_steps_cache(self, steps: int):
-        self._last_steps = (steps, datetime.now(timezone.utc))
+    def get_diagnostics(self) -> dict[str, Any]:
+        """Return latest diagnostics for debug endpoints."""
+        last = self._last_metrics
+        return {
+            "last_fetch_timestamp": last.timestamp_utc.isoformat() if last else None,
+            "heart_rate_source": last.heart_rate_source if last else None,
+            "steps_source": last.steps_source if last else None,
+            "last_error": self._last_error,
+            "tokens_loaded": bool(self.access_token),
+            "poll_interval": int(self.settings.fitbit_poll_interval),
+            "history_samples": len(self._history),
+        }
+
+    def get_metrics_since(self, since: datetime) -> list[Metrics]:
+        """Return cached metrics captured since the provided timestamp."""
+        if not self._history:
+            return []
+        since_utc = since.astimezone(timezone.utc) if since.tzinfo else since.replace(tzinfo=timezone.utc)
+        return [m for m in self._history if m.timestamp_utc >= since_utc]
 
     async def get_latest_metrics(self) -> Metrics:
         # Mock-first behavior for offline/dev or missing deps/tokens
         if not self.access_token or httpx is None:
             hr = self.get_cached_hr() or 72
             steps = self.get_cached_steps() or 0
-            self._update_cache(hr)
-            self._update_steps_cache(steps)
-            return Metrics(heart_rate_bpm=hr, steps=steps)
+            return self._update_cache(
+                heart_rate_bpm=hr,
+                steps=steps,
+                heart_rate_source="mock" if httpx is None else "cached",
+                steps_source="mock" if httpx is None else "cached",
+                error="httpx_not_available" if httpx is None else None,
+            )
 
         # Refresh if expired
         now_utc = datetime.now(timezone.utc)
@@ -183,30 +239,48 @@ class FitbitClient:
                 if hr is None or hr <= 0:
                     cached = self.get_cached_hr()
                     if cached is not None:
-                        hr = cached
-                    else:
-                        hr = 72
+                        metrics = self._last_metrics
+                        return self._update_cache(
+                            heart_rate_bpm=cached,
+                            steps=metrics.steps if metrics else 0,
+                            heart_rate_source=metrics.heart_rate_source if metrics else "cached",
+                            steps_source=metrics.steps_source if metrics else "cached",
+                            error="hr_missing_intraday",
+                        )
+                    hr = 72
+                    source = "mock"
                 elif source == "summary":
                     logger.warning(
                         "Fitbit intraday series unavailable; using resting heart rate summary. "
                         "Request intraday access in Fitbit Developer portal for live samples."
                     )
-                self._update_cache(hr)
                 # Fetch daily steps similar to tutorial example
-                steps = await self._get_daily_steps(headers)
-                self._update_steps_cache(steps)
-                return Metrics(heart_rate_bpm=hr, steps=steps)
+                steps, steps_source = await self._get_daily_steps(headers)
+                self._last_error = None
+                return self._update_cache(
+                    heart_rate_bpm=hr,
+                    steps=steps,
+                    heart_rate_source=source,
+                    steps_source=steps_source,
+                    error=None,
+                )
             except Exception as exc:
                 logger.warning("Fitbit fetch attempt {} failed: {}", attempt + 1, exc)
+                self._last_error = str(exc)
                 await asyncio.sleep(delay)
                 delay *= 2
 
         # Fallback
         hr = self.get_cached_hr() or 73
-        steps = self.get_cached_steps() or 0
-        self._update_cache(hr)
-        self._update_steps_cache(steps)
-        return Metrics(heart_rate_bpm=hr, steps=steps)
+        last = self._last_metrics
+        steps = last.steps if last else 0
+        return self._update_cache(
+            heart_rate_bpm=hr,
+            steps=steps,
+            heart_rate_source=last.heart_rate_source if last else "cached",
+            steps_source=last.steps_source if last else "cached",
+            error=self._last_error or "fitbit_fetch_failed",
+        )
 
     async def _refresh(self):
         if httpx is None or not self.refresh_token:
@@ -262,14 +336,14 @@ class FitbitClient:
         except Exception as exc:
             logger.warning("Fitbit refresh exception: {}", exc)
 
-    async def _get_daily_steps(self, headers: dict) -> int:
+    async def _get_daily_steps(self, headers: dict) -> Tuple[int, str]:
         """Fetch daily steps using Fitbit activities/steps endpoint.
 
         Mirrors the tutorial's example endpoint usage but leverages stored OAuth tokens.
-        Returns 0 on error.
+        Returns (steps, source) tuple.
         """
         if httpx is None or not self.access_token:
-            return 0
+            return 0, "mock"
         url = "https://api.fitbit.com/1/user/-/activities/steps/date/today/1d.json"
         try:
             async with httpx.AsyncClient(timeout=10) as client:
@@ -280,19 +354,20 @@ class FitbitClient:
                     r = await client.get(url, headers=new_headers)
                 if r.status_code >= 400:
                     logger.warning("Steps fetch failed: {} {}", r.status_code, r.text[:200])
-                    return 0
+                    return self.get_cached_steps() or 0, "cached"
                 body = r.json()
                 # body["activities-steps"] -> list of {dateTime, value}
                 arr = body.get("activities-steps") if isinstance(body, dict) else None
                 if isinstance(arr, list) and arr:
                     try:
-                        return int(arr[-1].get("value", 0))
+                        return int(arr[-1].get("value", 0)), "daily"
                     except Exception:
-                        return 0
-                return 0
+                        return self.get_cached_steps() or 0, "cached"
+                return self.get_cached_steps() or 0, "cached"
         except Exception as exc:
             logger.warning("Steps fetch exception: {}", exc)
-            return 0
+            self._last_error = str(exc)
+            return self.get_cached_steps() or 0, "cached"
 
     async def polling_loop(self, stop_event: asyncio.Event):
         interval = int(self.settings.fitbit_poll_interval)

@@ -24,6 +24,7 @@ from app.api.routers.auth import router as auth_router
 from app.api.routers.voice import router as voice_router
 from app.api.routers.session import router as session_router
 from app.api.routers.debug import router as debug_router
+from app.api.routers.training import router as training_router
 from app.core.db import engine, Base, SessionLocal
 from app.core.dal import get_tokens
 import asyncio
@@ -106,3 +107,4 @@ app.include_router(auth_router, prefix="", tags=["auth"])
 app.include_router(voice_router, prefix="", tags=["voice"])
 app.include_router(debug_router, prefix="", tags=["debug"])
 app.include_router(session_router, prefix="", tags=["session"])
+app.include_router(training_router, prefix="", tags=["training"])

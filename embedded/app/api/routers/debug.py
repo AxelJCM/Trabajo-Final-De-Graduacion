@@ -5,6 +5,7 @@ from fastapi.responses import StreamingResponse, PlainTextResponse, HTMLResponse
 from typing import Iterator
 from pathlib import Path
 import time
+from datetime import datetime, timezone
 
 from app.api.routers.posture import pose_estimator
 from app.core.config import get_settings
@@ -113,33 +114,45 @@ def mjpeg_frames(overlay: bool = True, app_state=None) -> Iterator[bytes]:
 
             # HR overlay (cached)
             try:
-                hr_txt = None
                 if app_state is not None and hasattr(app_state, "fitbit_client"):
-                    hr = app_state.fitbit_client.get_cached_hr()
-                    steps = app_state.fitbit_client.get_cached_steps() if hasattr(app_state.fitbit_client, "get_cached_steps") else None
-                    if hr is not None:
-                        # Simple zones: <100 low, 100-130 mod, 130-160 high, >160 very high (tune later by age)
-                        if hr < 100:
-                            color = (100, 255, 100)
-                            zone = "LOW"
-                        elif hr < 130:
-                            color = (255, 255, 0)
-                            zone = "MOD"
-                        elif hr < 160:
-                            color = (255, 165, 0)
-                            zone = "HIGH"
-                        else:
-                            color = (50, 50, 255)
-                            zone = "VH"
-                        hr_txt = f"HR: {hr} bpm [{zone}]"
-                        # Draw a background box tall enough for two lines if steps available
-                        box_w = 260
-                        box_h = 60 if steps is not None else 30
-                        cv2.rectangle(frame, (10, 45), (10 + box_w, 45 + box_h), (0, 0, 0), -1)
-                        cv2.putText(frame, hr_txt, (18, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
-                        if steps is not None:
-                            steps_txt = f"Steps: {steps:,}"
-                            cv2.putText(frame, steps_txt, (18, 85), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 2, cv2.LINE_AA)
+                    metrics = app_state.fitbit_client.get_cached_metrics()
+                else:
+                    metrics = None
+                if metrics:
+                    hr = metrics.heart_rate_bpm
+                    steps = metrics.steps
+                    # Zones heuristics
+                    if hr < 100:
+                        color = (100, 255, 100)
+                        zone = "LOW"
+                    elif hr < 130:
+                        color = (255, 255, 0)
+                        zone = "MOD"
+                    elif hr < 160:
+                        color = (255, 165, 0)
+                        zone = "HIGH"
+                    else:
+                        color = (50, 50, 255)
+                        zone = "VH"
+                    age_s = max(0, (datetime.now(timezone.utc) - metrics.timestamp_utc).total_seconds())
+                    age_txt = f"Δ{int(age_s)}s"
+                    meta_txt = f"{metrics.heart_rate_source.upper()} {age_txt}"
+                    hr_txt = f"HR: {hr} bpm [{zone}]"
+                    box_w = 300
+                    extra = 30 if steps is not None else 0
+                    if metrics.error:
+                        extra += 30
+                    cv2.rectangle(frame, (10, 45), (10 + box_w, 45 + 60 + extra), (0, 0, 0), -1)
+                    cv2.putText(frame, hr_txt, (18, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
+                    cv2.putText(frame, meta_txt, (18, 85), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1, cv2.LINE_AA)
+                    y = 105
+                    if steps is not None:
+                        steps_txt = f"Steps: {steps:,} [{metrics.steps_source.upper()}]"
+                        cv2.putText(frame, steps_txt, (18, y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 2, cv2.LINE_AA)
+                        y += 20
+                    if metrics.error:
+                        err_txt = f"Err: {metrics.error}"
+                        cv2.putText(frame, err_txt, (18, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1, cv2.LINE_AA)
             except Exception:
                 pass
 
@@ -233,6 +246,7 @@ async def view() -> HTMLResponse:
                     <span class=\"status\" id=\"fitbitStatus\">Fitbit: checking…</span>
                     <a href=\"/auth/fitbit/status\" target=\"_blank\" title=\"Open status JSON\">JSON</a>
                 </div>
+                <small id="fitbitSample" style="color:#bbb"></small>
                 <small>
                   Tip: si aparece un error de Redirect URI, use <b>Login with this IP</b> y registre esta URL exacta en el portal de Fitbit:<br/>
                   <code id=\"redirVal\"></code>
@@ -249,12 +263,36 @@ async def view() -> HTMLResponse:
                 }
                 async function refreshStatus(){
                     try{
-                        const r = await fetch('/auth/fitbit/status', {cache:'no-store'});
-                        const d = await r.json();
-                        const el = document.getElementById('fitbitStatus');
-                        if(d && d.connected){ el.textContent = 'Fitbit: connected'; el.style.color = '#00e676'; }
-                        else { el.textContent = 'Fitbit: not connected'; el.style.color = '#ff5252'; }
-                    }catch(e){ /* ignore */ }
+                        const [statusResp, metricsResp] = await Promise.all([
+                            fetch('/auth/fitbit/status', {cache:'no-store'}),
+                            fetch('/biometrics/last', {cache:'no-store'})
+                        ]);
+                        const status = await statusResp.json();
+                        const metrics = await metricsResp.json();
+                        const statusEl = document.getElementById('fitbitStatus');
+                        if(status && status.connected){ statusEl.textContent = 'Fitbit: connected'; statusEl.style.color = '#00e676'; }
+                        else { statusEl.textContent = 'Fitbit: not connected'; statusEl.style.color = '#ff5252'; }
+                        const sampleEl = document.getElementById('fitbitSample');
+                        if(metrics && metrics.success && metrics.data){
+                            const data = metrics.data;
+                            let text = `HR ${data.heart_rate_bpm} bpm (${data.heart_rate_source}) • Steps ${data.steps} (${data.steps_source})`;
+                            if(data.timestamp_utc){
+                                const age = Math.max(0, Math.round((Date.now() - Date.parse(data.timestamp_utc)) / 1000));
+                                text += ` • Δ${age}s`;
+                            }
+                            if(data.error){
+                                text += ` • err: ${data.error}`;
+                            }
+                            sampleEl.textContent = text;
+                        }else{
+                            sampleEl.textContent = 'Sin métricas disponibles';
+                        }
+                    }catch(e){
+                        const statusEl = document.getElementById('fitbitStatus');
+                        const sampleEl = document.getElementById('fitbitSample');
+                        if(statusEl){ statusEl.textContent = 'Fitbit: error'; statusEl.style.color = '#ff5252'; }
+                        if(sampleEl){ sampleEl.textContent = 'No se pudieron obtener métricas.'; }
+                    }
                 }
                 refreshStatus();
                 setInterval(refreshStatus, 5000);
@@ -314,8 +352,17 @@ async def diag(request: Request) -> dict:
     db = SessionLocal()
     try:
         tok = get_tokens(db)
+        fitbit_client = getattr(request.app.state, "fitbit_client", None)
+        client_diag = None
+        if fitbit_client is not None:
+            try:
+                client_diag = fitbit_client.get_diagnostics()
+            except Exception as exc:
+                client_diag = {"error": str(exc)}
         camera_opened = bool(pose_estimator.cap is not None)
         pose_ready = bool(pose_estimator.pose is not None)
+        lat_p50, lat_p95 = pose_estimator.get_latency_p50_p95_ms()
+        fps_avg = pose_estimator.get_fps_avg()
         # Basic DNS resolution check for Fitbit API
         import socket
         dns_ok = False
@@ -332,6 +379,12 @@ async def diag(request: Request) -> dict:
                 "width": getattr(pose_estimator, "width", None),
                 "height": getattr(pose_estimator, "height", None),
                 "fps_target": getattr(pose_estimator, "target_fps", None),
+                "fps_avg": round(fps_avg, 2),
+                "latency_ms": {
+                    "p50": round(lat_p50, 2),
+                    "p95": round(lat_p95, 2),
+                },
+                "latency_samples": pose_estimator.get_latency_samples_count(),
                 "vision_mock": getattr(pose_estimator, "vision_mock", None),
                 "pose_ready": pose_ready,
                 "model_complexity": getattr(pose_estimator, "model_complexity", None),
@@ -341,7 +394,8 @@ async def diag(request: Request) -> dict:
                 "redirect_uri": s.fitbit_redirect_uri,
                 "poll_interval": s.fitbit_poll_interval,
                 "tokens_present": bool(tok),
-                "app_state_client": bool(getattr(request.app.state, "fitbit_client", None)),
+                "app_state_client": bool(fitbit_client),
+                "client_diagnostics": client_diag,
             },
             "network": {
                 "dns_resolves_api_fitbit_com": dns_ok,

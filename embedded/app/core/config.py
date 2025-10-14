@@ -37,6 +37,7 @@ class Settings(BaseModel):
     fitbit_redirect_uri: str | None = os.getenv("FITBIT_REDIRECT_URI")
 
     use_vosk_offline: bool = os.getenv("USE_VOSK_OFFLINE", "1") == "1"
+    vosk_model_path: str | None = os.getenv("VOSK_MODEL_PATH")
 
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
 

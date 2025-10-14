@@ -1,0 +1,18 @@
+{
+  "start": "start",
+  "iniciar": "start",
+  "inicia": "start",
+  "inicia rutina": "start_routine",
+  "iniciar rutina": "start_routine",
+  "comienza rutina": "start_routine",
+  "pause": "pause",
+  "pausa": "pause",
+  "next": "next",
+  "siguiente": "next",
+  "stop": "stop",
+  "detener": "stop",
+  "volume_up": "volume_up",
+  "subir volumen": "volume_up",
+  "volume_down": "volume_down",
+  "bajar volumen": "volume_down"
+}

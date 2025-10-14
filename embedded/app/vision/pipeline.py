@@ -4,35 +4,24 @@ Exposes PoseEstimator.analyze_frame() returning PostureOutput.
 """
 from __future__ import annotations
 
+import math
+import os
 import time
+from collections import deque
+from dataclasses import dataclass
 from typing import List
+
+from loguru import logger
 
 try:
     import cv2  # type: ignore
 except Exception:  # pragma: no cover - allow tests w/o OpenCV
     cv2 = None  # type: ignore
 
-from loguru import logger
-
-import math
-import os
-import time
-from dataclasses import dataclass
-from typing import List
-from collections import deque
-
-from loguru import logger
-
-try:  # OpenCV is optional on dev machines
-    import cv2
-except Exception:  # pragma: no cover
-    cv2 = None  # type: ignore
-
 try:
     import mediapipe as mp  # type: ignore
 except Exception:  # pragma: no cover
     mp = None  # type: ignore
-
 
 @dataclass
 class Joint:
@@ -178,7 +167,16 @@ class PoseEstimator:
             Joint("right_knee", 0.52, 0.82, 0.8),
         ]
         angles = Angles(160.0, 160.0, 170.0, 170.0, 0.0)
-        return PostureOutput(joints=joints, angles=angles, feedback="Postura OK", quality=87.0, fps=0.0, exercise=self.exercise, phase=self.phase, rep_count=self.rep_count)
+        return PostureOutput(
+            joints=joints,
+            angles=angles,
+            feedback="Postura OK",
+            quality=87.0,
+            fps=float(self.target_fps),
+            exercise=self.exercise,
+            phase=self.phase,
+            rep_count=self.rep_count,
+        )
 
     def _compute_output(self, landmarks_norm, fps: float) -> PostureOutput:
         lm = {name: (landmarks_norm[name][0], landmarks_norm[name][1]) for name in landmarks_norm}

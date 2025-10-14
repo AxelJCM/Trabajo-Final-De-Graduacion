@@ -13,4 +13,8 @@ async def test_biometrics_returns_mock_without_tokens():
     assert r.status_code == 200
     body = r.json()
     assert body["success"] is True
-    assert body["data"]["heart_rate_bpm"] >= 0
+    data = body["data"]
+    assert data["heart_rate_bpm"] >= 0
+    assert data["steps"] >= 0
+    assert data["heart_rate_source"] in {"mock", "cached", "summary", "intraday"}
+    assert "timestamp_utc" in data
