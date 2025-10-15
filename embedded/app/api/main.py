@@ -29,6 +29,7 @@ from app.core.db import engine, Base, SessionLocal
 from app.core.dal import get_tokens
 import asyncio
 from app.biometrics.fitbit_client import FitbitClient
+from app.voice.listener import VoiceIntentListener, ListenerConfig
 from loguru import logger
 
 settings = get_settings()
@@ -45,6 +46,7 @@ async def lifespan(app: FastAPI):
     # Start Fitbit polling if tokens exist
     db = SessionLocal()
     stop_event = asyncio.Event()
+    voice_listener: VoiceIntentListener | None = None
     try:
         if get_tokens(db):
             client = FitbitClient()
@@ -52,6 +54,18 @@ async def lifespan(app: FastAPI):
             app.state._fitbit_task = task
             app.state._fitbit_stop = stop_event
             app.state.fitbit_client = client
+        if settings.voice_listener_enabled:
+            cfg = ListenerConfig(
+                base_url=settings.voice_listener_base_url,
+                device=settings.voice_listener_device,
+                rate=settings.voice_listener_rate,
+                blocksize=settings.voice_listener_blocksize,
+                silence_window=settings.voice_listener_silence_window,
+                dedupe_seconds=settings.voice_listener_dedupe_seconds,
+            )
+            voice_listener = VoiceIntentListener(cfg)
+            voice_listener.start()
+            app.state.voice_listener = voice_listener
     finally:
         db.close()
     yield
@@ -62,6 +76,12 @@ async def lifespan(app: FastAPI):
         await app.state._fitbit_task
     if hasattr(app.state, "fitbit_client"):
         delattr(app.state, "fitbit_client")
+    if hasattr(app.state, "voice_listener"):
+        try:
+            app.state.voice_listener.stop()
+        except Exception as exc:  # pragma: no cover
+            logger.warning("Error deteniendo voice listener: {}", exc)
+        delattr(app.state, "voice_listener")
 
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
