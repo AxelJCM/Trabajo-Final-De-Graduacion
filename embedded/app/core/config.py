@@ -38,6 +38,7 @@ class Settings(BaseModel):
 
     use_vosk_offline: bool = os.getenv("USE_VOSK_OFFLINE", "1") == "1"
     vosk_model_path: str | None = os.getenv("VOSK_MODEL_PATH")
+    voice_intent_model_path: str | None = os.getenv("VOICE_INTENT_MODEL_PATH")
 
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
 

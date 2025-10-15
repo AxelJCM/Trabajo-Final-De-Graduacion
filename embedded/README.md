@@ -32,9 +32,11 @@ All responses use { success, data, error }.
 
 ## Training data collection
 - Capture pose sample: `python scripts/collect_pose_sample.py sentadilla --notes "buen angulo"`
-- Registrar sinÃ³nimo de voz: `python scripts/add_voice_synonym.py "inicia cardio" start_routine`
+- Registrar sinónimo de voz: `python scripts/add_voice_synonym.py "inicia cardio" start_routine`
+- Grabar y registrar frase (audio + sinónimo): `python scripts/record_and_register_voice.py "inicia rutina" start_routine --output embedded/app/data/training/voice`
+- Entrenar clasificador de intents (requiere scikit-learn): `python scripts/train_voice_intent.py`
 
-Pose samples se guardan en `embedded/app/data/training/pose/`, mientras que voz en `embedded/app/data/training/voice/`. Configura `USE_VOSK_OFFLINE=1` y `VOSK_MODEL_PATH` en `.env` despuÃ©s de descargar un modelo adecuado (por ejemplo `vosk-model-small-es-0.42`). 
+Pose samples se guardan en `embedded/app/data/training/pose/`, mientras que voz en `embedded/app/data/training/voice/`. Configura `USE_VOSK_OFFLINE=1` y `VOSK_MODEL_PATH` en `.env` después de descargar un modelo adecuado (por ejemplo `vosk-model-small-es-0.42`). Si entrenas un clasificador personalizado, apunta `VOICE_INTENT_MODEL_PATH` al archivo `.joblib` generado para habilitar el fallback inteligente.
 
 ## CLI fallback
 If GUI isn't available, run:
