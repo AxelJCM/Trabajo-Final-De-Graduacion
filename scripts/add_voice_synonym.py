@@ -10,13 +10,13 @@ import requests
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Agregar sinónimo/intención para el módulo de voz")
-    parser.add_argument("transcript", help="Transcripción del audio o frase")
+    parser = argparse.ArgumentParser(description="Agregar sinonimo/intencion para el modulo de voz")
+    parser.add_argument("transcript", help="Transcripcion del audio o frase")
     parser.add_argument("intent", help="Intent deseado (start, pause, start_routine, etc.)")
     parser.add_argument("--audio", help="Ruta al archivo de audio asociado", default=None)
     parser.add_argument("--base-url", default="http://127.0.0.1:8000", help="URL del backend (default: %(default)s)")
     parser.add_argument("--token", help="X-API-Key si es requerido", default=None)
-    parser.add_argument("--no-synonym", action="store_true", help="No agregar como sinónimo (solo registrar sample)")
+    parser.add_argument("--no-synonym", action="store_true", help="No agregar como sinonimo (solo registrar sample)")
     return parser.parse_args()
 
 
