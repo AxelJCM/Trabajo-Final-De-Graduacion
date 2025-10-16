@@ -17,36 +17,36 @@ from app.voice.recognizer import VoiceRecognizer, map_utterance_to_intent
 try:
     import vosk  # type: ignore
 except Exception as exc:  # pragma: no cover
-    print(f"[VOICE] La libreria vosk no esta disponible: {exc}")
+    print(f"[VOICE] Vosk library not available: {exc}")
     sys.exit(1)
 
 DEFAULT_RATE = 16000
-DEFAULT_DEVICE = None  # use default device if not specified
+DEFAULT_DEVICE = None
 
 INTENT_ACTIONS: Dict[str, Tuple[str, str, Optional[dict]]] = {
     "start": ("POST", "/session/start", {"exercise": "squat"}),
     "start_routine": ("POST", "/session/start", {"exercise": "squat"}),
     "pause": ("POST", "/session/stop", None),
     "stop": ("POST", "/session/stop", None),
-    # "next" could hit another endpoint; for now just log
+    # "next": ("POST", "/session/next", None),  # add when endpoint exists
 }
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Listener de voz en tiempo real")
-    parser.add_argument("--base-url", default="http://127.0.0.1:8000", help="URL base del backend")
-    parser.add_argument("--device", type=int, default=DEFAULT_DEVICE, help="Indice del dispositivo de audio (arecord -l / sd.query_devices)")
-    parser.add_argument("--rate", type=int, default=DEFAULT_RATE, help="Frecuencia de muestreo")
-    parser.add_argument("--blocksize", type=int, default=8000, help="Tamaño de bloque de audio")
-    parser.add_argument("--silence-window", type=float, default=1.0, help="Segundos de silencio para resetear reconocimiento")
-    parser.add_argument("--dedupe-seconds", type=float, default=2.0, help="Ignorar mismos intents detectados en este intervalo")
+    parser = argparse.ArgumentParser(description="Real-time voice listener")
+    parser.add_argument("--device", type=int, default=DEFAULT_DEVICE, help="Input device index (arecord -l)")
+    parser.add_argument("--rate", type=int, default=DEFAULT_RATE, help="Sample rate")
+    parser.add_argument("--blocksize", type=int, default=8000, help="Audio block size")
+    parser.add_argument("--base-url", default="http://127.0.0.1:8000", help="Backend base URL")
+    parser.add_argument("--silence-window", type=float, default=1.0, help="Seconds of silence to reset recognizer")
+    parser.add_argument("--dedupe-seconds", type=float, default=2.0, help="Ignore repeated intents for this window")
     return parser.parse_args()
 
 
 def trigger_intent(intent: str, base_url: str) -> None:
     action = INTENT_ACTIONS.get(intent)
     if not action:
-        print(f"[VOICE] Intent '{intent}' detectado (sin accion asociada)")
+        print(f"[VOICE] Intent '{intent}' detected (no action configured)")
         return
     method, path, payload = action
     url = base_url.rstrip("/") + path
@@ -56,9 +56,9 @@ def trigger_intent(intent: str, base_url: str) -> None:
         else:
             resp = requests.get(url, params=payload, timeout=5)
         resp.raise_for_status()
-        print(f"[VOICE] Intent '{intent}' ejecutado -> {url}")
+        print(f"[VOICE] Intent '{intent}' executed -> {url}")
     except Exception as exc:
-        print(f"[VOICE] Error ejecutando intent '{intent}': {exc}")
+        print(f"[VOICE] Error executing intent '{intent}': {exc}")
 
 
 def main() -> None:
@@ -68,24 +68,24 @@ def main() -> None:
     recognizer = VoiceRecognizer()
     vosk_model = recognizer._vosk_model
     if vosk_model is None:
-        print("[VOICE] No se cargó el modelo Vosk. Verifica USE_VOSK_OFFLINE/VOSK_MODEL_PATH.")
+        print("[VOICE] Vosk model not loaded. Check USE_VOSK_OFFLINE/VOSK_MODEL_PATH.")
         sys.exit(1)
 
     try:
         rec = vosk.KaldiRecognizer(vosk_model, args.rate)
     except Exception as exc:
-        print(f"[VOICE] No se pudo crear el reconocedor Vosk: {exc}")
+        print(f"[VOICE] Could not create recognizer: {exc}")
         sys.exit(1)
 
     last_intent: Optional[str] = None
     last_intent_ts: float = 0.0
 
-    def audio_callback(indata, frames, time_info, status):
+    def audio_callback(indata, frames, time_info, status):  # pragma: no cover
         if status:
-            print(f"[VOICE] Status de audio: {status}")
+            print(f"[VOICE] Audio status: {status}")
         audio_queue.put(bytes(indata))
 
-    print("[VOICE] Escuchando... (Ctrl+C para salir)")
+    print("[VOICE] Listening... (Ctrl+C to exit)")
 
     with sd.RawInputStream(
         samplerate=args.rate,
@@ -103,18 +103,18 @@ def main() -> None:
                 result = json.loads(rec.Result())
                 text = (result.get("text") or "").strip()
                 if text:
-                    print(f"[VOICE] Texto: '{text}'")
+                    print(f"[VOICE] Text: '{text}'")
                     intent = map_utterance_to_intent(text)
                     if intent:
                         now = time.time()
                         if last_intent == intent and (now - last_intent_ts) < args.dedupe_seconds:
-                            print(f"[VOICE] Intent '{intent}' ignorado (duplicado)")
+                            print(f"[VOICE] Intent '{intent}' ignored (duplicate)")
                         else:
                             trigger_intent(intent, args.base_url)
                             last_intent = intent
                             last_intent_ts = now
                     else:
-                        print("[VOICE] Intent no reconocido")
+                        print("[VOICE] Intent not recognized")
                 rec.Reset()
                 buffer_since_speech = 0.0
             else:
