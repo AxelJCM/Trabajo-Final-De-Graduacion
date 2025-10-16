@@ -145,7 +145,7 @@ class PoseEstimator:
         self.feedback_code = feedback_code
         self.feedback = feedback
 
-        frame_b64 = self._encode_frame(frame)
+        frame_b64 = self._encode_frame(frame, joints, quality)
 
         result = PoseResult(
             fps=round(fps, 2),
@@ -480,6 +480,10 @@ class PoseEstimator:
             PoseJoint("right_knee", 0.53, 0.75, -0.1, 0.9),
             PoseJoint("left_elbow", 0.42, 0.45, -0.1, 0.9),
             PoseJoint("right_elbow", 0.58, 0.45, -0.1, 0.9),
+            PoseJoint("left_wrist", 0.40, 0.52, -0.1, 0.9),
+            PoseJoint("right_wrist", 0.60, 0.52, -0.1, 0.9),
+            PoseJoint("left_ankle", 0.47, 0.92, -0.1, 0.9),
+            PoseJoint("right_ankle", 0.53, 0.92, -0.1, 0.9),
         ]
 
         angles = PoseAngles(
@@ -507,7 +511,7 @@ class PoseEstimator:
         cv2.circle(frame, (center_x, center_y), 80, (255, 255, 255), -1)
         cv2.putText(
             frame,
-            f"{self.exercise.upper()} {int(angle_value)}°",
+            f"{self.exercise.upper()} {int(angle_value)}",
             (40, height - 40),
             cv2.FONT_HERSHEY_SIMPLEX,
             1.2,
@@ -529,10 +533,53 @@ class PoseEstimator:
             return cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
         return frame
 
-    def _encode_frame(self, frame: Optional[np.ndarray]) -> Optional[str]:
+    def _draw_skeleton(self, frame: np.ndarray, joints: List[PoseJoint], quality: float) -> np.ndarray:
+        if cv2 is None or not joints:
+            return frame
+        height, width = frame.shape[0], frame.shape[1]
+        joint_map = {j.name: j for j in joints}
+        if quality >= 85:
+            color = (0, 200, 0)
+        elif quality >= 65:
+            color = (0, 215, 255)
+        else:
+            color = (0, 0, 255)
+        thickness = max(2, width // 240)
+        radius = max(3, width // 180)
+        connections = [
+            ("left_ankle", "left_knee"),
+            ("left_knee", "left_hip"),
+            ("left_hip", "left_shoulder"),
+            ("left_shoulder", "left_elbow"),
+            ("left_elbow", "left_wrist"),
+            ("right_ankle", "right_knee"),
+            ("right_knee", "right_hip"),
+            ("right_hip", "right_shoulder"),
+            ("right_shoulder", "right_elbow"),
+            ("right_elbow", "right_wrist"),
+            ("left_shoulder", "right_shoulder"),
+            ("left_hip", "right_hip"),
+        ]
+
+        def to_pixel(j: PoseJoint) -> Tuple[int, int]:
+            return int(j.x * width), int(j.y * height)
+
+        for a, b in connections:
+            ja = joint_map.get(a)
+            jb = joint_map.get(b)
+            if ja and jb and ja.score > 0.2 and jb.score > 0.2:
+                cv2.line(frame, to_pixel(ja), to_pixel(jb), color, thickness, cv2.LINE_AA)
+        for joint in joints:
+            if joint.score <= 0.2:
+                continue
+            cv2.circle(frame, to_pixel(joint), radius, color, thickness=-1, lineType=cv2.LINE_AA)
+        return frame
+
+    def _encode_frame(self, frame: Optional[np.ndarray], joints: List[PoseJoint], quality: float) -> Optional[str]:
         if frame is None or cv2 is None:
             return None
         frame_to_encode = frame.copy()
+        frame_to_encode = self._draw_skeleton(frame_to_encode, joints, quality)
         rotate = int(getattr(self.settings, "hud_frame_rotate", 0))
         frame_to_encode = self._apply_rotation(frame_to_encode, rotate)
         h, w = frame_to_encode.shape[:2]
@@ -544,10 +591,18 @@ class PoseEstimator:
                 (int(w * scale), int(h * scale)),
                 interpolation=cv2.INTER_AREA,
             )
-        success, buffer = cv2.imencode(".jpg", frame_to_encode, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+        success, buffer = cv2.imencode(".jpg", frame_to_encode, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
         if not success:
             return None
         return base64.b64encode(buffer).decode("ascii")
+
+    def get_fps_avg(self) -> float:
+        if not self._fps_window:
+            return 0.0
+        return sum(self._fps_window) / len(self._fps_window)
+
+    def get_latency_samples_count(self) -> int:
+        return len(self._latencies)
 
     # --- context -------------------------------------------------------
 
