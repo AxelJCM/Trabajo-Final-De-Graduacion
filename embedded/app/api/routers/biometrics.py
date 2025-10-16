@@ -7,7 +7,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 from loguru import logger
 
-from app.api.schemas import Envelope
+from app.api.schemas import Envelope, BiometricsOutput
 from app.biometrics.fitbit_client import FitbitClient
 
 router = APIRouter()
@@ -25,7 +25,8 @@ async def biometrics_endpoint(request: Request) -> Envelope:
         m.heart_rate_source,
         m.steps_source,
     )
-    return Envelope(success=True, data=m.to_dict())
+    payload = BiometricsOutput.model_validate(m.to_dict())
+    return Envelope(success=True, data=payload.model_dump())
 
 
 @router.get("/biometrics/last", response_model=Envelope)
@@ -34,7 +35,8 @@ async def biometrics_last(request: Request) -> Envelope:
     metrics = client.get_cached_metrics()
     if metrics is None:
         metrics = await client.get_latest_metrics()
-    return Envelope(success=True, data=metrics.to_dict())
+    payload = BiometricsOutput.model_validate(metrics.to_dict())
+    return Envelope(success=True, data=payload.model_dump())
 
 
 def _ensure_client(request: Request) -> FitbitClient:

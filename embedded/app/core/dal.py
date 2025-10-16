@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 
-from .models import Token, UserConfig, SessionMetrics
+from .models import Token, UserConfig, SessionMetrics, BiometricSample
 
 
 def init_defaults(db: Session) -> None:
@@ -137,6 +137,75 @@ def save_tokens(
 def add_session_metrics(db: Session, **kwargs) -> SessionMetrics:
     row = SessionMetrics(**kwargs)
     db.add(row)
+    try:
+        db.commit()
+        db.refresh(row)
+        return row
+    except OperationalError:
+        db.rollback()
+        _ensure_session_metrics_columns(db)
+        row = SessionMetrics(**kwargs)
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        return row
+
+
+def add_biometric_sample(db: Session, **kwargs) -> BiometricSample:
+    row = BiometricSample(**kwargs)
+    db.add(row)
     db.commit()
     db.refresh(row)
     return row
+
+
+def get_last_biometric_sample(db: Session) -> Optional[BiometricSample]:
+    return (
+        db.query(BiometricSample)
+        .order_by(BiometricSample.timestamp_utc.desc())
+        .first()
+    )
+
+
+def get_biometric_history(db: Session, limit: int = 120) -> list[BiometricSample]:
+    q = (
+        db.query(BiometricSample)
+        .order_by(BiometricSample.timestamp_utc.desc())
+        .limit(limit)
+    )
+    return list(q)
+
+
+def get_last_session_metrics(db: Session) -> Optional[SessionMetrics]:
+    return (
+        db.query(SessionMetrics)
+        .order_by(SessionMetrics.started_at_utc.desc())
+        .first()
+    )
+
+
+def get_session_history(db: Session, limit: int = 20) -> list[SessionMetrics]:
+    q = (
+        db.query(SessionMetrics)
+        .order_by(SessionMetrics.started_at_utc.desc())
+        .limit(limit)
+    )
+    return list(q)
+
+
+def _ensure_session_metrics_columns(db: Session) -> None:
+    try:
+        res = db.execute(text("PRAGMA table_info(session_metrics)"))
+    except Exception:
+        return
+    existing = {row[1] for row in res}  # type: ignore[index]
+    migrations = [
+        ("ended_at_utc", "ALTER TABLE session_metrics ADD COLUMN ended_at_utc DATETIME"),
+        ("duration_active_sec", "ALTER TABLE session_metrics ADD COLUMN duration_active_sec INTEGER DEFAULT 0"),
+        ("total_reps", "ALTER TABLE session_metrics ADD COLUMN total_reps INTEGER DEFAULT 0"),
+        ("exercise", "ALTER TABLE session_metrics ADD COLUMN exercise VARCHAR"),
+    ]
+    for name, ddl in migrations:
+        if name not in existing:
+            db.execute(text(ddl))
+    db.commit()

@@ -38,15 +38,6 @@ class ListenerConfig:
     dedupe_seconds: float = 2.0
 
 
-INTENT_ACTIONS = {
-    "start": ("POST", "/session/start", {"exercise": "squat"}),
-    "start_routine": ("POST", "/session/start", {"exercise": "squat"}),
-    "pause": ("POST", "/session/stop", None),
-    "stop": ("POST", "/session/stop", None),
-    # "next": could call another endpoint in the future
-}
-
-
 class VoiceIntentListener:
     """Runs in a background thread listening for intents."""
 
@@ -59,6 +50,8 @@ class VoiceIntentListener:
         self._audio_queue: "queue.Queue[bytes]" = queue.Queue()
         self._last_intent: Optional[str] = None
         self._last_intent_ts: float = 0.0
+        self._exercise_cycle = ["squat", "pushup", "crunch"]
+        self._cycle_index = 0
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -86,21 +79,34 @@ class VoiceIntentListener:
     # --- internal helpers ---
 
     def _trigger_intent(self, intent: str) -> None:
-        action = INTENT_ACTIONS.get(intent)
-        if not action:
-            logger.info("Intent '{}' detectado (sin accion configurada)", intent)
+        if requests is None:
             return
-        method, path, payload = action
-        url = self.config.base_url.rstrip("/") + path
-        try:
-            if method.upper() == "POST":
+        base = self.config.base_url.rstrip("/")
+
+        def _post(path: str, payload: Optional[dict]) -> None:
+            url = base + path
+            try:
                 resp = requests.post(url, json=payload, timeout=5)
-            else:
-                resp = requests.get(url, params=payload, timeout=5)
-            resp.raise_for_status()
-            logger.info("Intent '{}' ejecutado -> {}", intent, url)
-        except Exception as exc:  # pragma: no cover
-            logger.warning("Error ejecutando intent '{}': {}", intent, exc)
+                resp.raise_for_status()
+                logger.info("Intent '{}' ejecutado -> {}", intent, url)
+            except Exception as exc:  # pragma: no cover
+                logger.warning("Error ejecutando intent '{}': {}", intent, exc)
+
+        if intent in {"start", "start_routine"}:
+            if intent == "start_routine":
+                self._cycle_index = 0
+            exercise = self._exercise_cycle[self._cycle_index]
+            _post("/session/start", {"exercise": exercise, "reset": True})
+        elif intent == "pause":
+            _post("/session/pause", {})
+        elif intent == "stop":
+            _post("/session/stop", {})
+        elif intent == "next":
+            self._cycle_index = (self._cycle_index + 1) % len(self._exercise_cycle)
+            exercise = self._exercise_cycle[self._cycle_index]
+            _post("/session/exercise", {"exercise": exercise, "reset": True})
+        else:
+            logger.info("Intent '{}' detectado (sin accion configurada)", intent)
 
     def _audio_callback(self, indata, frames, time_info, status) -> None:  # pragma: no cover - callback
         if status:

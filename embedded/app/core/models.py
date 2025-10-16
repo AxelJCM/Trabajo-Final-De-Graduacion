@@ -36,7 +36,29 @@ class SessionMetrics(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     started_at_utc = Column(DateTime, default=datetime.utcnow)
+    ended_at_utc = Column(DateTime, nullable=True)
     duration_sec = Column(Integer, default=0)
+    duration_active_sec = Column(Integer, default=0)
     avg_hr = Column(Integer, default=0)
     max_hr = Column(Integer, default=0)
     avg_quality = Column(Float, default=0.0)
+    total_reps = Column(Integer, default=0)
+    exercise = Column(String, nullable=True)
+
+
+class BiometricSample(Base):
+    __tablename__ = "biometric_sample"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    timestamp_utc = Column(DateTime, default=datetime.utcnow, index=True)
+    heart_rate_bpm = Column(Integer, default=0)
+    steps = Column(Integer, default=0)
+    heart_rate_source = Column(String, default="mock")
+    steps_source = Column(String, default="mock")
+    zone_name = Column(String, nullable=True)
+    zone_label = Column(String, nullable=True)
+    zone_color = Column(String, nullable=True)
+    intensity = Column(Float, default=0.0)
+    status = Column(String, default="offline")
+    status_level = Column(String, default="yellow")
+    status_message = Column(String, nullable=True)

@@ -6,7 +6,6 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 from loguru import logger
-from dataclasses import asdict
 
 from app.api.schemas import Envelope, PostureInput, PostureOutput
 from app.vision.pipeline import PoseEstimator
@@ -22,8 +21,13 @@ async def posture_endpoint(payload: PostureInput) -> Envelope:
 
     For now, this pulls from the camera internally and returns dummy joints.
     """
-    result: PostureOutput = pose_estimator.analyze_frame()
-    logger.info("posture fps={}", result.fps)
-    # Support dataclass result from vision pipeline
-    data = result.model_dump() if hasattr(result, "model_dump") else asdict(result)
-    return Envelope(success=True, data=data)
+    result = pose_estimator.analyze_frame()
+    logger.info(
+        "posture fps={} reps={} phase={} latency_p95={}",
+        result.fps,
+        result.rep_count,
+        result.phase,
+        result.latency_ms_p95,
+    )
+    payload = PostureOutput.model_validate(result.to_dict())
+    return Envelope(success=True, data=payload.model_dump())

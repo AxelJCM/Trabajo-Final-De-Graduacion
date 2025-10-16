@@ -17,4 +17,6 @@ async def test_biometrics_returns_mock_without_tokens():
     assert data["heart_rate_bpm"] >= 0
     assert data["steps"] >= 0
     assert data["heart_rate_source"] in {"mock", "cached", "summary", "intraday"}
+    assert data["fitbit_status_level"] in {"green", "yellow", "red"}
     assert "timestamp_utc" in data
+    assert "zone_color" in data

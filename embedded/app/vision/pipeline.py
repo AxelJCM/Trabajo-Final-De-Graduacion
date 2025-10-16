@@ -1,318 +1,492 @@
-"""Vision pipeline for posture analysis using OpenCV and MediaPipe.
-
-Exposes PoseEstimator.analyze_frame() returning PostureOutput.
-"""
+"""Pose estimation pipeline with rep counting, quality metrics, and HUD payload."""
 from __future__ import annotations
 
 import math
-import os
 import time
 from collections import deque
-from dataclasses import dataclass
-from typing import List
+from dataclasses import dataclass, asdict, field
+from statistics import median
+from typing import Dict, Iterable, List, Optional, Tuple
 
+import numpy as np
 from loguru import logger
 
-try:
+try:  # Optional dependencies when running on the Raspberry Pi
     import cv2  # type: ignore
-except Exception:  # pragma: no cover - allow tests w/o OpenCV
+except Exception:  # pragma: no cover
     cv2 = None  # type: ignore
 
-try:
+try:  # Optional when running in CI
     import mediapipe as mp  # type: ignore
 except Exception:  # pragma: no cover
     mp = None  # type: ignore
 
+from app.core.config import get_settings
+
+
 @dataclass
-class Joint:
+class PoseJoint:
     name: str
     x: float
     y: float
+    z: float
     score: float
 
 
 @dataclass
-class Angles:
-    left_elbow: float
-    right_elbow: float
-    left_knee: float
-    right_knee: float
-    shoulder_hip_alignment: float
+class PoseAngles:
+    left_elbow: Optional[float] = None
+    right_elbow: Optional[float] = None
+    left_knee: Optional[float] = None
+    right_knee: Optional[float] = None
+    left_hip: Optional[float] = None
+    right_hip: Optional[float] = None
+    shoulder_hip_alignment: Optional[float] = None
+    torso_forward: Optional[float] = None
 
 
 @dataclass
-class PostureOutput:
-    joints: List[Joint]
-    angles: Angles
-    feedback: str
-    quality: float
+class PoseResult:
     fps: float
+    latency_ms: float
+    latency_ms_p50: float
+    latency_ms_p95: float
+    joints: List[PoseJoint]
+    angles: PoseAngles
+    quality: float
+    quality_avg: float
+    feedback: str
+    feedback_code: str
     exercise: str
     phase: str
+    phase_label: str
     rep_count: int
+    current_exercise_reps: int
+    rep_totals: Dict[str, int] = field(default_factory=dict)
+    timestamp_utc: float = field(default_factory=lambda: time.time())
 
-
-def _angle(a, b, c) -> float:
-    ax, ay = a
-    bx, by = b
-    cx, cy = c
-    ab = (ax - bx, ay - by)
-    cb = (cx - bx, cy - by)
-    dot = ab[0] * cb[0] + ab[1] * cb[1]
-    mag_ab = math.hypot(*ab)
-    mag_cb = math.hypot(*cb)
-    if mag_ab == 0 or mag_cb == 0:
-        return 0.0
-    cosang = max(-1.0, min(1.0, dot / (mag_ab * mag_cb)))
-    return math.degrees(math.acos(cosang))
+    def to_dict(self) -> dict:
+        result = asdict(self)
+        result["joints"] = [asdict(j) for j in self.joints]
+        result["angles"] = asdict(self.angles)
+        return result
 
 
 class PoseEstimator:
-    def __init__(self, camera_index: int | None = None):
-        self.camera_index = camera_index if camera_index is not None else int(os.getenv("CAMERA_INDEX", "0"))
-        self.width = int(os.getenv("CAMERA_WIDTH", "640"))
-        self.height = int(os.getenv("CAMERA_HEIGHT", "480"))
-        self.target_fps = int(os.getenv("CAMERA_FPS", "30"))
-        self.model_complexity = int(os.getenv("MODEL_COMPLEXITY", "0"))
-        self.vision_mock = os.getenv("VISION_MOCK", "0") in {"1", "true", "TRUE", "yes", "on"}
-        self.cap = None
-        self.pose = None
-        # Repetition counting state
-        self.exercise = os.getenv("EXERCISE", "squat").lower()
-        self.phase = "up"  # up|down for squat
-        self.rep_count = 0
-        # Thresholds with hysteresis for squat knee angle
-        self.squat_up_threshold = float(os.getenv("SQUAT_UP_DEG", "150"))
-        self.squat_down_threshold = float(os.getenv("SQUAT_DOWN_DEG", "100"))
-        self._init_video_and_model()
-        # Latency metrics (seconds per frame)
-        self._lat_samples: deque[float] = deque(maxlen=int(os.getenv("LAT_SAMPLES", "300")))
-        self._last_latency: float = 0.0
+    """Pose estimation pipeline with MediaPipe fallback to mock data."""
 
-    # --- Metrics helpers ---
-    def _record_latency(self, dt: float) -> None:
+    _SPANISH_PHASE = {"up": "Ascenso", "down": "Descenso"}
+
+    def __init__(self) -> None:
+        self.settings = get_settings()
+        self.exercise: str = "squat"
+        self.phase: str = "up"
+        self.rep_count: int = 0
+        self.rep_totals: Dict[str, int] = {"squat": 0, "pushup": 0, "crunch": 0}
+        self.feedback: str = "Listo para empezar"
+        self.feedback_code: str = "idle"
+        self._latencies: deque[float] = deque(maxlen=max(5, self.settings.pose_latency_window))
+        self._quality_window: deque[float] = deque(maxlen=max(5, self.settings.pose_quality_window))
+        self._quality_sum: float = 0.0
+        self._quality_count: int = 0
+        self._fps_window: deque[float] = deque(maxlen=60)
+        self._last_frame_ts: Optional[float] = None
+        self._mock: bool = bool(self.settings.vision_mock or cv2 is None or mp is None)
+        self._pose = None
+        self._cap = None
+        self._mp_landmarks = None
+        self._mock_progress: float = 0.0
+        self._thresholds = {
+            "squat": {
+                "down": float(self.settings.squat_down_angle),
+                "up": float(self.settings.squat_up_angle),
+            },
+            "pushup": {
+                "down": float(self.settings.pushup_down_angle),
+                "up": float(self.settings.pushup_up_angle),
+            },
+            "crunch": {
+                "down": float(self.settings.crunch_down_angle),
+                "up": float(self.settings.crunch_up_angle),
+            },
+        }
+
+        if not self._mock:
+            try:
+                self._init_realtime_pipeline()
+            except Exception as exc:  # pragma: no cover
+                logger.warning("Falling back to pose mock pipeline: {}", exc)
+                self._mock = True
+
+        if self._mock:
+            logger.info("PoseEstimator running in mock mode (VISION_MOCK=1 or missing deps)")
+
+    # --- Public API -----------------------------------------------------
+
+    def analyze_frame(self) -> PoseResult:
+        """Capture a frame, compute joints/angles, rep counting, and metrics."""
+        start = time.perf_counter()
+        joints, angles = self._process_frame()
+        latency_ms = (time.perf_counter() - start) * 1000.0
+        self._latencies.append(latency_ms)
+        fps = self._update_fps()
+        latency_p50, latency_p95 = self._latency_percentiles()
+
+        quality = self._compute_quality(angles)
+        self._quality_window.append(quality)
+        self._quality_sum += quality
+        self._quality_count += 1
+        avg_quality = self.get_average_quality()
+
+        self._update_reps(angles)
+        feedback_code, feedback = self._feedback_for_angles(angles, quality)
+        self.feedback_code = feedback_code
+        self.feedback = feedback
+
+        result = PoseResult(
+            fps=round(fps, 2),
+            latency_ms=round(latency_ms, 2),
+            latency_ms_p50=round(latency_p50, 2),
+            latency_ms_p95=round(latency_p95, 2),
+            joints=joints,
+            angles=angles,
+            quality=round(quality, 2),
+            quality_avg=round(avg_quality, 2),
+            feedback=feedback,
+            feedback_code=feedback_code,
+            exercise=self.exercise,
+            phase=self.phase,
+            phase_label=self._SPANISH_PHASE.get(self.phase, self.phase.title()),
+            rep_count=self.rep_count,
+            current_exercise_reps=self.rep_totals.get(self.exercise, 0),
+            rep_totals=dict(self.rep_totals),
+        )
+        return result
+
+    def get_average_quality(self) -> float:
+        if not self._quality_count:
+            return 0.0
+        return self._quality_sum / self._quality_count
+
+    def reset_session(self, exercise: Optional[str] = None, *, preserve_totals: bool = False) -> None:
+        if exercise:
+            self.exercise = exercise.lower()
+        self.phase = "up"
+        self.rep_count = 0
+        if preserve_totals:
+            self.rep_totals.setdefault(self.exercise, 0)
+        else:
+            self.rep_totals = {k: 0 for k in self.rep_totals}
+            self.rep_totals.setdefault(self.exercise, 0)
+        self.feedback = "Listo para empezar"
+        self.feedback_code = "idle"
+        self._latencies.clear()
+        self._quality_window.clear()
+        self._quality_sum = 0.0
+        self._quality_count = 0
+        self._fps_window.clear()
+        self._last_frame_ts = None
+        self._mock_progress = 0.0
+
+    def set_exercise(self, exercise: str, *, reset: bool = False) -> None:
+        exercise_name = exercise.lower()
+        if reset:
+            self.reset_session(exercise=exercise_name, preserve_totals=False)
+            return
+        self.exercise = exercise_name
+        self.phase = "up"
+        self.rep_totals.setdefault(self.exercise, 0)
+        self.feedback = "Ejercicio actualizado"
+        self.feedback_code = "exercise_changed"
+
+    def get_phase_label(self) -> str:
+        return self._SPANISH_PHASE.get(self.phase, self.phase.title())
+
+    # --- Internal helpers -----------------------------------------------
+
+    def _init_realtime_pipeline(self) -> None:  # pragma: no cover - hardware path
+        assert cv2 is not None and mp is not None
+        mp_pose = mp.solutions.pose
+        self._pose = mp_pose.Pose(
+            static_image_mode=False,
+            model_complexity=int(self.settings.model_complexity),
+            enable_segmentation=False,
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5,
+        )
+        self._mp_landmarks = mp_pose.PoseLandmark
+        self._cap = cv2.VideoCapture(int(self.settings.camera_index))
+        if not self._cap or not self._cap.isOpened():
+            raise RuntimeError("Camera could not be opened")
+        self._configure_camera()
+
+    def _configure_camera(self) -> None:  # pragma: no cover - hardware path
+        assert cv2 is not None and self._cap is not None
+        self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, int(self.settings.camera_width))
+        self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, int(self.settings.camera_height))
+        self._cap.set(cv2.CAP_PROP_FPS, int(self.settings.camera_fps))
+
+    def _process_frame(self) -> Tuple[List[PoseJoint], PoseAngles]:
+        if self._mock:
+            return self._mock_frame()
+        assert self._cap is not None and cv2 is not None and mp is not None
+        ok, frame = self._cap.read()
+        if not ok:
+            logger.warning("Camera read failed; switching to mock mode")
+            self._mock = True
+            return self._mock_frame()
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = self._pose.process(rgb) if self._pose else None  # type: ignore[attr-defined]
+        if not results or not results.pose_landmarks:
+            return [], PoseAngles()
+        landmarks = results.pose_landmarks.landmark
+        points = self._landmark_points(landmarks)
+        joints = [
+            PoseJoint(name=name, x=pt[0], y=pt[1], z=pt[2], score=pt[3])
+            for name, pt in points.items()
+        ]
+        angles = self._compute_angles(points)
+        return joints, angles
+
+    def _landmark_points(self, landmarks) -> Dict[str, Tuple[float, float, float, float]]:
+        if mp is None:
+            return {}
+        lm = self._mp_landmarks
+        indices = {
+            "left_shoulder": lm.LEFT_SHOULDER,
+            "right_shoulder": lm.RIGHT_SHOULDER,
+            "left_elbow": lm.LEFT_ELBOW,
+            "right_elbow": lm.RIGHT_ELBOW,
+            "left_wrist": lm.LEFT_WRIST,
+            "right_wrist": lm.RIGHT_WRIST,
+            "left_hip": lm.LEFT_HIP,
+            "right_hip": lm.RIGHT_HIP,
+            "left_knee": lm.LEFT_KNEE,
+            "right_knee": lm.RIGHT_KNEE,
+            "left_ankle": lm.LEFT_ANKLE,
+            "right_ankle": lm.RIGHT_ANKLE,
+            "nose": lm.NOSE,
+        }
+        points: Dict[str, Tuple[float, float, float, float]] = {}
+        for name, idx in indices.items():
+            landmark = landmarks[int(idx)]
+            points[name] = (
+                float(landmark.x),
+                float(landmark.y),
+                float(landmark.z),
+                float(getattr(landmark, "visibility", 1.0)),
+            )
+        return points
+
+    def _compute_angles(self, points: Dict[str, Tuple[float, float, float, float]]) -> PoseAngles:
+        def get(names: Iterable[str]) -> Optional[Tuple[float, float, float]]:
+            coords = []
+            for n in names:
+                if n not in points:
+                    return None
+                coords.append(points[n][:3])
+            return tuple(coords)  # type: ignore[return-value]
+
+        def angle(a: Tuple[float, float, float], b: Tuple[float, float, float], c: Tuple[float, float, float]) -> float:
+            v1 = np.array(a) - np.array(b)
+            v2 = np.array(c) - np.array(b)
+            norm = np.linalg.norm(v1) * np.linalg.norm(v2)
+            if norm == 0:
+                return 0.0
+            cos = np.clip(np.dot(v1, v2) / norm, -1.0, 1.0)
+            return math.degrees(math.acos(cos))
+
+        left_elbow = angle(*get(("left_shoulder", "left_elbow", "left_wrist"))) if get(("left_shoulder", "left_elbow", "left_wrist")) else None
+        right_elbow = angle(*get(("right_shoulder", "right_elbow", "right_wrist"))) if get(("right_shoulder", "right_elbow", "right_wrist")) else None
+        left_knee = angle(*get(("left_hip", "left_knee", "left_ankle"))) if get(("left_hip", "left_knee", "left_ankle")) else None
+        right_knee = angle(*get(("right_hip", "right_knee", "right_ankle"))) if get(("right_hip", "right_knee", "right_ankle")) else None
+        left_hip = angle(*get(("left_shoulder", "left_hip", "left_knee"))) if get(("left_shoulder", "left_hip", "left_knee")) else None
+        right_hip = angle(*get(("right_shoulder", "right_hip", "right_knee"))) if get(("right_shoulder", "right_hip", "right_knee")) else None
+        shoulder_hip = angle(*get(("left_shoulder", "left_hip", "right_hip"))) if get(("left_shoulder", "left_hip", "right_hip")) else None
+
+        torso_angle: Optional[float] = None
+        if all(n in points for n in ("left_shoulder", "left_hip", "right_hip")):
+            shoulder = np.array(points["left_shoulder"][:3])
+            hip_mid = (
+                np.array(points["left_hip"][:3]) + np.array(points["right_hip"][:3])
+            ) / 2.0
+            vec = shoulder - hip_mid
+            torso_angle = math.degrees(math.atan2(abs(vec[0]), abs(vec[1]) + 1e-6))
+
+        return PoseAngles(
+            left_elbow=left_elbow,
+            right_elbow=right_elbow,
+            left_knee=left_knee,
+            right_knee=right_knee,
+            left_hip=left_hip,
+            right_hip=right_hip,
+            shoulder_hip_alignment=shoulder_hip,
+            torso_forward=torso_angle,
+        )
+
+    def _update_fps(self) -> float:
+        now = time.perf_counter()
+        if self._last_frame_ts is None:
+            self._last_frame_ts = now
+            return float(self.settings.camera_fps or 0)
+        delta = now - self._last_frame_ts
+        self._last_frame_ts = now
+        if delta <= 0:
+            return float(self.settings.camera_fps or 0)
+        fps = 1.0 / delta
+        self._fps_window.append(fps)
+        return sum(self._fps_window) / len(self._fps_window)
+
+    def _latency_percentiles(self) -> Tuple[float, float]:
+        if not self._latencies:
+            return 0.0, 0.0
+        data = list(self._latencies)
         try:
-            self._last_latency = float(dt)
-            self._lat_samples.append(float(dt))
+            p50 = float(np.percentile(data, 50))
+            p95 = float(np.percentile(data, 95))
+        except Exception:
+            p50 = float(median(data))
+            p95 = float(sorted(data)[max(0, int(len(data) * 95 / 100) - 1)])
+        return p50, p95
+
+    def _compute_quality(self, angles: PoseAngles) -> float:
+        thresholds = self._thresholds.get(self.exercise, self._thresholds["squat"])
+        down = thresholds["down"]
+        up = thresholds["up"]
+        target = down if self.phase == "up" else up
+        angle_value = self._primary_angle(angles)
+        if angle_value is None:
+            return 0.0
+        error = abs(angle_value - target)
+        # Normalize error by the angular range and clamp
+        range_span = max(10.0, abs(up - down))
+        score = max(0.0, 100.0 - (error / range_span) * 120.0)
+        return max(0.0, min(100.0, score))
+
+    def _primary_angle(self, angles: PoseAngles) -> Optional[float]:
+        if self.exercise == "squat":
+            candidates = [v for v in (angles.left_knee, angles.right_knee) if v is not None]
+        elif self.exercise == "pushup":
+            candidates = [v for v in (angles.left_elbow, angles.right_elbow) if v is not None]
+        else:  # crunch
+            candidates = [v for v in (angles.left_hip, angles.right_hip, angles.shoulder_hip_alignment) if v is not None]
+        if not candidates:
+            return None
+        return float(sum(candidates) / len(candidates))
+
+    def _update_reps(self, angles: PoseAngles) -> None:
+        angle_value = self._primary_angle(angles)
+        if angle_value is None:
+            return
+        thresholds = self._thresholds.get(self.exercise, self._thresholds["squat"])
+        down = thresholds["down"]
+        up = thresholds["up"]
+        if self.phase == "up" and angle_value <= down:
+            self.phase = "down"
+        elif self.phase == "down" and angle_value >= up:
+            self.phase = "up"
+            self.rep_count += 1
+            self.rep_totals[self.exercise] = self.rep_totals.get(self.exercise, 0) + 1
+
+    def _feedback_for_angles(self, angles: PoseAngles, quality: float) -> Tuple[str, str]:
+        angle_value = self._primary_angle(angles)
+        if angle_value is None:
+            return "no_skeleton", "No se detecta el cuerpo"
+
+        thresholds = self._thresholds.get(self.exercise, self._thresholds["squat"])
+        down = thresholds["down"]
+        up = thresholds["up"]
+        margin = max(5.0, (up - down) * 0.1)
+
+        if self.exercise == "squat":
+            if angle_value > up - margin:
+                return "go_lower", "Baja más la cadera"
+            if angle_value < down + margin:
+                return "control_up", "Controla el ascenso"
+            torso = angles.torso_forward or 0.0
+            if torso > 25:
+                return "straight_back", "Mantén la espalda recta"
+        elif self.exercise == "pushup":
+            if angle_value > up - margin:
+                return "go_lower", "Flexiona más los codos"
+            if angle_value < down + margin:
+                return "control_up", "Sube con control"
+        elif self.exercise == "crunch":
+            if angle_value < down - margin:
+                return "protect_neck", "No cargues el cuello"
+            if angle_value > up - margin:
+                return "go_lower", "Activa el abdomen y sube"
+
+        if quality >= 85:
+            return "excellent", "Excelente técnica"
+        if quality >= 65:
+            return "good", "Buen ritmo"
+        return "keep_trying", "Sigue así, estabiliza el movimiento"
+
+    def _mock_frame(self) -> Tuple[List[PoseJoint], PoseAngles]:
+        self._mock_progress = (self._mock_progress + 0.12) % (2 * math.pi)
+        depth = (math.sin(self._mock_progress) + 1) / 2  # 0..1
+        thresholds = self._thresholds.get(self.exercise, self._thresholds["squat"])
+        up = thresholds["up"]
+        down = thresholds["down"]
+        angle_value = up - (up - down) * depth
+
+        left_elbow = right_elbow = 165.0
+        left_knee = right_knee = 160.0
+        left_hip = right_hip = 150.0
+        torso_forward = 12.0
+        shoulder_alignment = 150.0
+
+        if self.exercise == "squat":
+            left_knee = angle_value
+            right_knee = angle_value
+            torso_forward = 10.0 + depth * 10.0
+        elif self.exercise == "pushup":
+            left_elbow = angle_value
+            right_elbow = angle_value
+            left_knee = right_knee = 175.0
+            torso_forward = 5.0
+        else:  # crunch
+            left_hip = angle_value
+            right_hip = angle_value
+            left_knee = right_knee = 90.0
+            left_elbow = right_elbow = 160.0
+            torso_forward = 15.0 + depth * 8.0
+            shoulder_alignment = 140.0 - depth * 25.0
+
+        joints = [
+            PoseJoint("left_shoulder", 0.45, 0.35, -0.1, 0.9),
+            PoseJoint("right_shoulder", 0.55, 0.35, -0.1, 0.9),
+            PoseJoint("left_hip", 0.47, 0.55, -0.1, 0.9),
+            PoseJoint("right_hip", 0.53, 0.55, -0.1, 0.9),
+            PoseJoint("left_knee", 0.47, 0.75, -0.1, 0.9),
+            PoseJoint("right_knee", 0.53, 0.75, -0.1, 0.9),
+            PoseJoint("left_elbow", 0.42, 0.45, -0.1, 0.9),
+            PoseJoint("right_elbow", 0.58, 0.45, -0.1, 0.9),
+        ]
+
+        angles = PoseAngles(
+            left_elbow=left_elbow,
+            right_elbow=right_elbow,
+            left_knee=left_knee,
+            right_knee=right_knee,
+            left_hip=left_hip,
+            right_hip=right_hip,
+            shoulder_hip_alignment=shoulder_alignment,
+            torso_forward=torso_forward,
+        )
+        return joints, angles
+
+    # --- context -------------------------------------------------------
+
+    def __del__(self) -> None:  # pragma: no cover
+        try:
+            if self._cap:
+                self._cap.release()
         except Exception:
             pass
-
-    def get_latency_samples_count(self) -> int:
-        return len(self._lat_samples)
-
-    def get_latency_p50_p95_ms(self) -> tuple[float, float]:
-        if not self._lat_samples:
-            return (0.0, 0.0)
-        vals = sorted(self._lat_samples)
-        n = len(vals)
-        def percentile(p: float) -> float:
-            # p in [0,100]
-            if n == 1:
-                return vals[0]
-            k = (p/100.0) * (n - 1)
-            f = int(k)
-            c = min(f + 1, n - 1)
-            if f == c:
-                return vals[f]
-            return vals[f] + (vals[c] - vals[f]) * (k - f)
-        p50 = percentile(50.0) * 1000.0
-        p95 = percentile(95.0) * 1000.0
-        return (p50, p95)
-
-    def get_fps_avg(self) -> float:
-        if not self._lat_samples:
-            return 0.0
-        # Average of instantaneous FPS values (harmonic alternative would be n/sum(dt))
         try:
-            return sum(1.0/max(1e-6, dt) for dt in self._lat_samples) / len(self._lat_samples)
+            if self._pose and hasattr(self._pose, "close"):
+                self._pose.close()
         except Exception:
-            return 0.0
-
-    def _init_video_and_model(self):
-        if self.vision_mock:
-            logger.info("VISION_MOCK is enabled; skipping camera and model init")
-            return
-        if cv2 is not None:
-            try:
-                cap = cv2.VideoCapture(self.camera_index)
-                cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
-                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
-                cap.set(cv2.CAP_PROP_FPS, self.target_fps)
-                if cap.isOpened():
-                    self.cap = cap
-                    logger.info("Camera opened at {}x{}@{}fps (index {})", self.width, self.height, self.target_fps, self.camera_index)
-            except Exception as exc:  # pragma: no cover
-                logger.warning("OpenCV camera init failed: {}", exc)
-        if mp is not None:
-            try:
-                self.pose = mp.solutions.pose.Pose(
-                    static_image_mode=False,
-                    model_complexity=self.model_complexity,
-                    enable_segmentation=False,
-                    min_detection_confidence=0.5,
-                    min_tracking_confidence=0.5,
-                )
-            except Exception as exc:  # pragma: no cover
-                logger.warning("MediaPipe Pose init failed: {}", exc)
-
-    def _mock_output(self) -> PostureOutput:
-        joints = [
-            Joint("left_shoulder", 0.45, 0.4, 0.9),
-            Joint("right_shoulder", 0.55, 0.4, 0.9),
-            Joint("left_elbow", 0.42, 0.55, 0.85),
-            Joint("right_elbow", 0.58, 0.55, 0.85),
-            Joint("left_hip", 0.48, 0.65, 0.85),
-            Joint("right_hip", 0.52, 0.65, 0.85),
-            Joint("left_knee", 0.48, 0.82, 0.8),
-            Joint("right_knee", 0.52, 0.82, 0.8),
-        ]
-        angles = Angles(160.0, 160.0, 170.0, 170.0, 0.0)
-        return PostureOutput(
-            joints=joints,
-            angles=angles,
-            feedback="Postura OK",
-            quality=87.0,
-            fps=float(self.target_fps),
-            exercise=self.exercise,
-            phase=self.phase,
-            rep_count=self.rep_count,
-        )
-
-    def _compute_output(self, landmarks_norm, fps: float) -> PostureOutput:
-        lm = {name: (landmarks_norm[name][0], landmarks_norm[name][1]) for name in landmarks_norm}
-        ang_left_elbow = _angle(lm["LEFT_SHOULDER"], lm["LEFT_ELBOW"], lm["LEFT_WRIST"]) if all(k in lm for k in ["LEFT_SHOULDER","LEFT_ELBOW","LEFT_WRIST"]) else 0.0
-        ang_right_elbow = _angle(lm["RIGHT_SHOULDER"], lm["RIGHT_ELBOW"], lm["RIGHT_WRIST"]) if all(k in lm for k in ["RIGHT_SHOULDER","RIGHT_ELBOW","RIGHT_WRIST"]) else 0.0
-        ang_left_knee = _angle(lm["LEFT_HIP"], lm["LEFT_KNEE"], lm["LEFT_ANKLE"]) if all(k in lm for k in ["LEFT_HIP","LEFT_KNEE","LEFT_ANKLE"]) else 0.0
-        ang_right_knee = _angle(lm["RIGHT_HIP"], lm["RIGHT_KNEE"], lm["RIGHT_ANKLE"]) if all(k in lm for k in ["RIGHT_HIP","RIGHT_KNEE","RIGHT_ANKLE"]) else 0.0
-        align = (lm.get("LEFT_SHOULDER", (0, 0))[1] + lm.get("RIGHT_SHOULDER", (0, 0))[1]) / 2 - (
-            (lm.get("LEFT_HIP", (0, 0))[1] + lm.get("RIGHT_HIP", (0, 0))[1]) / 2
-        )
-        shoulder_hip_alignment = abs(align)
-
-        joints = [
-            Joint("left_shoulder", *lm.get("LEFT_SHOULDER", (0.0, 0.0)), 0.9),
-            Joint("right_shoulder", *lm.get("RIGHT_SHOULDER", (0.0, 0.0)), 0.9),
-            Joint("left_elbow", *lm.get("LEFT_ELBOW", (0.0, 0.0)), 0.8),
-            Joint("right_elbow", *lm.get("RIGHT_ELBOW", (0.0, 0.0)), 0.8),
-            Joint("left_hip", *lm.get("LEFT_HIP", (0.0, 0.0)), 0.8),
-            Joint("right_hip", *lm.get("RIGHT_HIP", (0.0, 0.0)), 0.8),
-            Joint("left_knee", *lm.get("LEFT_KNEE", (0.0, 0.0)), 0.75),
-            Joint("right_knee", *lm.get("RIGHT_KNEE", (0.0, 0.0)), 0.75),
-        ]
-        angles = Angles(
-            left_elbow=ang_left_elbow,
-            right_elbow=ang_right_elbow,
-            left_knee=ang_left_knee,
-            right_knee=ang_right_knee,
-            shoulder_hip_alignment=shoulder_hip_alignment,
-        )
-
-        quality = 100.0
-        if shoulder_hip_alignment > 0.05:
-            quality -= min(40.0, shoulder_hip_alignment * 400)
-        for a in [ang_left_elbow, ang_right_elbow, ang_left_knee, ang_right_knee]:
-            if a == 0.0:
-                quality -= 10.0
-
-        feedback = "Postura OK" if quality >= 80 else ("Atención a la alineación" if quality >= 60 else "Corrige postura")
-
-        # Repetition counting for squat
-        if self.exercise == "squat":
-            # Use the minimum knee angle as the movement indicator (both legs)
-            knee_angle = 0.0
-            knees = [ang_left_knee, ang_right_knee]
-            knees = [k for k in knees if k > 0]
-            if knees:
-                knee_angle = min(knees)
-                # Phase transitions with hysteresis
-                if self.phase == "up" and knee_angle < self.squat_down_threshold:
-                    self.phase = "down"
-                elif self.phase == "down" and knee_angle > self.squat_up_threshold:
-                    self.phase = "up"
-                    self.rep_count += 1
-        
-        return PostureOutput(
-            joints=joints,
-            angles=angles,
-            feedback=feedback,
-            quality=max(0.0, min(100.0, quality)),
-            fps=fps,
-            exercise=self.exercise,
-            phase=self.phase,
-            rep_count=self.rep_count,
-        )
-
-    def analyze_frame(self) -> PostureOutput:
-        # If mock flag set or no camera/model, return mock
-        if self.vision_mock or self.cap is None or self.pose is None:
-            return self._mock_output()
-
-        t0 = time.time()
-        ok, frame = self.cap.read()
-        if not ok:
-            return self._mock_output()
-        img = frame
-        t_pre0 = time.time()
-        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        result = self.pose.process(img_rgb)
-        dt = time.time() - t0
-        fps = 1.0 / max(1e-6, dt)
-        self._record_latency(dt)
-
-        if not result.pose_landmarks:
-            out = self._mock_output()
-            out.fps = fps
-            return out
-
-        # Normalize landmarks to [0,1] using image size
-        h, w = img.shape[:2]
-        idx_to_name = {
-            11: "LEFT_SHOULDER",
-            12: "RIGHT_SHOULDER",
-            13: "LEFT_ELBOW",
-            14: "RIGHT_ELBOW",
-            15: "LEFT_WRIST",
-            16: "RIGHT_WRIST",
-            23: "LEFT_HIP",
-            24: "RIGHT_HIP",
-            25: "LEFT_KNEE",
-            26: "RIGHT_KNEE",
-            27: "LEFT_ANKLE",
-            28: "RIGHT_ANKLE",
-        }
-        landmarks_norm = {}
-        for idx, lm in enumerate(result.pose_landmarks.landmark):
-            if idx in idx_to_name:
-                landmarks_norm[idx_to_name[idx]] = (lm.x, lm.y)
-
-        out = self._compute_output(landmarks_norm, fps=fps)
-
-        # Graceful degradation if fps too low
-        if fps < 10.0:
-            if self.width > 640 or self.height > 360:
-                self.width = 640
-                self.height = 360
-                logger.info("Low FPS detected ({:.1f}). Reducing resolution to {}x{}.", fps, self.width, self.height)
-                try:
-                    self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
-                    self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
-                except Exception:
-                    pass
-            if self.model_complexity != 0 and mp is not None:
-                logger.info("Setting model_complexity to 0 for performance")
-                try:
-                    self.pose.close()
-                except Exception:
-                    pass
-                self.model_complexity = 0
-                try:
-                    self.pose = mp.solutions.pose.Pose(static_image_mode=False, model_complexity=0, enable_segmentation=False, min_detection_confidence=0.5, min_tracking_confidence=0.5)
-                except Exception:
-                    pass
-
-        return out
-
-    def snapshot(self) -> PostureOutput:
-        # Use analyze_frame; if no hardware it returns mock
-        out = self.analyze_frame()
-        return out
+            pass

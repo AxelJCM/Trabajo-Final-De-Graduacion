@@ -82,6 +82,9 @@ async def test_fitbit_client_uses_intraday_dataset(monkeypatch):
     assert metrics.steps_source in {"intraday", "daily", "cached"}
     assert metrics.timestamp_utc.tzinfo is not None
     assert metrics.error is None
+    assert metrics.zone_name is not None
+    assert metrics.fitbit_status_level in {"green", "yellow", "red"}
+    assert metrics.fitbit_status_icon in {"🟢", "🟡", "🔴"}
     assert queue == []
 
 
@@ -129,4 +132,7 @@ async def test_fitbit_client_falls_back_to_summary(monkeypatch):
     assert metrics.heart_rate_source == "summary"
     assert metrics.steps_source in {"intraday", "daily", "cached"}
     assert metrics.timestamp_utc.tzinfo is not None
+    assert metrics.zone_name is not None
+    assert metrics.fitbit_status_level in {"green", "yellow", "red"}
+    assert metrics.fitbit_status_icon in {"🟢", "🟡", "🔴"}
     assert queue == []

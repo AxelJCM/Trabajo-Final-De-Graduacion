@@ -49,6 +49,9 @@ class Settings(BaseModel):
     voice_listener_dedupe_seconds: float = float(os.getenv("VOICE_LISTENER_DEDUPE_SECONDS", "2.0"))
     voice_listener_base_url: str = os.getenv("VOICE_LISTENER_BASE_URL", "http://127.0.0.1:8000")
 
+    hr_resting: int = int(os.getenv("HR_RESTING", "60"))
+    hr_max: int = int(os.getenv("HR_MAX", "190"))
+
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
 
     # Security & CORS
@@ -60,6 +63,22 @@ class Settings(BaseModel):
     # Biometrics / scheduling
     fitbit_poll_interval: int = int(os.getenv("FITBIT_POLL_INTERVAL", "15"))
     timezone: str = os.getenv("TIMEZONE", "America/Costa_Rica")
+
+    # Vision / pose estimation
+    camera_index: int = int(os.getenv("CAMERA_INDEX", "0"))
+    camera_width: int = int(os.getenv("CAMERA_WIDTH", "640"))
+    camera_height: int = int(os.getenv("CAMERA_HEIGHT", "360"))
+    camera_fps: int = int(os.getenv("CAMERA_FPS", "15"))
+    model_complexity: int = int(os.getenv("MODEL_COMPLEXITY", "0"))
+    vision_mock: bool = os.getenv("VISION_MOCK", "0").strip().lower() in {"1", "true", "yes", "on"}
+    pose_latency_window: int = int(os.getenv("POSE_LATENCY_WINDOW", "90"))
+    pose_quality_window: int = int(os.getenv("POSE_QUALITY_WINDOW", "30"))
+    squat_down_angle: float = float(os.getenv("SQUAT_DOWN_ANGLE", "80"))
+    squat_up_angle: float = float(os.getenv("SQUAT_UP_ANGLE", "160"))
+    pushup_down_angle: float = float(os.getenv("PUSHUP_DOWN_ANGLE", "75"))
+    pushup_up_angle: float = float(os.getenv("PUSHUP_UP_ANGLE", "150"))
+    crunch_down_angle: float = float(os.getenv("CRUNCH_DOWN_ANGLE", "50"))
+    crunch_up_angle: float = float(os.getenv("CRUNCH_UP_ANGLE", "150"))
 
 
 @lru_cache

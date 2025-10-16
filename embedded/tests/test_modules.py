@@ -10,3 +10,5 @@ def test_pose_estimator():
     out = pe.analyze_frame()
     assert out.fps > 0
     assert len(out.joints) >= 1
+    assert isinstance(out.rep_totals, dict)
+    assert out.feedback_code is not None

@@ -22,7 +22,12 @@ except Exception:  # pragma: no cover
 
 from app.core.config import get_settings
 from app.core.db import SessionLocal
-from app.core.dal import get_tokens as dal_get_tokens, save_tokens as dal_save_tokens
+from app.core.dal import (
+    get_tokens as dal_get_tokens,
+    save_tokens as dal_save_tokens,
+    add_biometric_sample,
+    get_last_biometric_sample,
+)
 
 
 @dataclass
@@ -35,6 +40,15 @@ class Metrics:
     heart_rate_source: str
     steps_source: str
     error: Optional[str] = None
+    zone_name: Optional[str] = None
+    zone_label: Optional[str] = None
+    zone_color: Optional[str] = None
+    intensity: float = 0.0
+    fitbit_status: str = "unknown"
+    fitbit_status_level: str = "yellow"
+    fitbit_status_icon: str = "🟡"
+    fitbit_status_message: Optional[str] = None
+    staleness_sec: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -75,7 +89,36 @@ class FitbitClient:
         return self._last_metrics.steps if self._last_metrics else None
 
     def get_cached_metrics(self) -> Optional[Metrics]:
-        return self._last_metrics
+        if self._last_metrics:
+            return self._decorate_metrics(self._last_metrics)
+        db = SessionLocal()
+        try:
+            row = get_last_biometric_sample(db)
+        finally:
+            db.close()
+        if not row:
+            return None
+        ts = row.timestamp_utc
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        metrics = Metrics(
+            heart_rate_bpm=row.heart_rate_bpm,
+            steps=row.steps,
+            timestamp_utc=ts,
+            heart_rate_source=row.heart_rate_source or "cached",
+            steps_source=row.steps_source or "cached",
+            zone_name=row.zone_name,
+            zone_label=row.zone_label,
+            zone_color=row.zone_color,
+            intensity=row.intensity or 0.0,
+            fitbit_status=row.status or "cached",
+            fitbit_status_icon=row.status_icon or "yellow",
+            fitbit_status_message=row.status_message,
+            error=None,
+        )
+        self._last_metrics = metrics
+        self._history.append(metrics)
+        return self._decorate_metrics(metrics)
 
     @staticmethod
     def _normalize_expiry(value: Optional[datetime]) -> Optional[datetime]:
@@ -153,18 +196,118 @@ class FitbitClient:
         steps_source: str,
         error: Optional[str],
     ) -> Metrics:
+        timestamp = datetime.now(timezone.utc)
         metrics = Metrics(
             heart_rate_bpm=heart_rate_bpm,
             steps=steps,
-            timestamp_utc=datetime.now(timezone.utc),
+            timestamp_utc=timestamp,
             heart_rate_source=heart_rate_source,
             steps_source=steps_source,
             error=error,
         )
+        metrics = self._decorate_metrics(metrics)
         self._last_metrics = metrics
         self._last_error = error
         self._history.append(metrics)
+        self._persist_metrics(metrics)
         return metrics
+
+    def _decorate_metrics(self, metrics: Metrics) -> Metrics:
+        zone = self._compute_zone(metrics.heart_rate_bpm)
+        metrics.zone_name = zone["name"]
+        metrics.zone_label = zone["label"]
+        metrics.zone_color = zone["color"]
+        metrics.intensity = zone["intensity"]
+
+        now = datetime.now(timezone.utc)
+        staleness = max(0.0, (now - metrics.timestamp_utc).total_seconds())
+        metrics.staleness_sec = staleness
+
+        status = self._compute_status(metrics, staleness)
+        metrics.fitbit_status = status["status"]
+        metrics.fitbit_status_level = status["level"]
+        metrics.fitbit_status_icon = status["icon"]
+        metrics.fitbit_status_message = status["message"]
+        return metrics
+
+    def _compute_zone(self, hr: int) -> dict[str, Any]:
+        rest = max(40, int(self.settings.hr_resting or 60))
+        max_hr = max(rest + 10, int(self.settings.hr_max or 180))
+        hrr = max(1, max_hr - rest)
+        intensity = max(0.0, (hr - rest) / hrr)
+        zones = [
+            (0.45, ("below", "Reposo activo", "#5DADE2")),
+            (0.6, ("warmup", "Calentamiento", "#48C9B0")),
+            (0.75, ("fat_burn", "Zona quema grasa", "#52BE80")),
+            (0.9, ("cardio", "Cardio", "#F39C12")),
+            (1.2, ("peak", "Zona pico", "#E74C3C")),
+        ]
+        selected = ("rest", "Reposo", "#95A5A6")
+        for threshold, zone in zones:
+            if intensity < threshold:
+                selected = zone
+                break
+        else:
+            selected = zones[-1][1]
+        return {
+            "name": selected[0],
+            "label": selected[1],
+            "color": selected[2],
+            "intensity": min(1.0, intensity),
+        }
+
+    def _compute_status(self, metrics: Metrics, staleness: float) -> dict[str, str]:
+        icon_map = {"green": "🟢", "yellow": "🟡", "red": "🔴"}
+        interval = max(5, int(self.settings.fitbit_poll_interval or 15))
+        if metrics.error:
+            return {
+                "status": "error",
+                "level": "red",
+                "icon": icon_map["red"],
+                "message": f"Error Fitbit ({metrics.error})",
+            }
+
+        if staleness <= interval * 2:
+            level = "green"
+        elif staleness <= interval * 5:
+            level = "yellow"
+        else:
+            level = "red"
+
+        if metrics.heart_rate_source in {"mock", "cached"} and level == "green":
+            level = "yellow"
+
+        message = f"Última sync hace {int(staleness)}s"
+        status = "ok" if level == "green" else ("stale" if level == "yellow" else "offline")
+        return {
+            "status": status,
+            "level": level,
+            "icon": icon_map.get(level, "🟡"),
+            "message": message,
+        }
+
+    def _persist_metrics(self, metrics: Metrics) -> None:
+        db = SessionLocal()
+        try:
+            add_biometric_sample(
+                db,
+                timestamp_utc=metrics.timestamp_utc.replace(tzinfo=None),
+                heart_rate_bpm=metrics.heart_rate_bpm,
+                steps=metrics.steps,
+                heart_rate_source=metrics.heart_rate_source,
+                steps_source=metrics.steps_source,
+                zone_name=metrics.zone_name,
+                zone_label=metrics.zone_label,
+                zone_color=metrics.zone_color,
+                intensity=float(metrics.intensity),
+                status=metrics.fitbit_status,
+                status_level=metrics.fitbit_status_level,
+                status_message=metrics.fitbit_status_message,
+            )
+        except Exception as exc:  # pragma: no cover - best effort persistence
+            logger.warning("Failed to persist biometric sample: {}", exc)
+        finally:
+            db.close()
 
     def get_diagnostics(self) -> dict[str, Any]:
         """Return latest diagnostics for debug endpoints."""

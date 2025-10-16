@@ -1,47 +1,84 @@
 # Embedded Backend (FastAPI + Python)
 
-Provides the Smart Mirror backend running on Raspberry Pi 4.
+Servicio que corre en la Raspberry Pi y orquesta visión, biometría, HUD y voz para el TFG.
 
-- Vision (OpenCV + MediaPipe)
-- Biometrics (Fitbit Web API)
-- Voice (Vosk/Google)
-- GUI (PyQt5 or Tkinter)
+## Puesta en marcha rápida (PC de desarrollo)
+1. `python -m venv .venv`
+2. Activar el entorno y `pip install -r embedded/requirements.txt`
+3. `uvicorn app.api.main:app --reload --host 0.0.0.0 --port 8000`
 
-## Run locally
+## Stack completo en la Pi
+1. Configura `embedded/.env` (ver `.env.example`).
+2. En la Pi ejecuta:
+   ```bash
+   ./scripts/run_pi_stack.sh
+   ```
+   - Variables opcionales: `BASE_URL` (por defecto `http://127.0.0.1:8000`) y `HUD_MODE=overlay|cli`.
+3. El script levanta:
+   - API FastAPI (`uvicorn`)
+   - Listener de voz (`scripts/run_voice_listener.py`)
+   - HUD (CLI o PyQt overlay)
+   - Logs en `embedded/app/data/logs/`.
 
-1. Create venv and install deps
-2. Start server
+Detén todo con `Ctrl+C` (el script hace cleanup de procesos).
 
-Try it (PowerShell):
+## HUD / CLI
+- Esquina sup. izquierda: estado de sesión (Activa/Pausa/Finalizada), hora de inicio y último comando con marca temporal.
+- Esquina sup. derecha: frecuencia cardíaca con color según zona (cálculo Karvonen), pasos y estado Fitbit (`🟢/🟡/🔴`).
+- Centro izquierdo: ejercicio actual, reps totales, reps del ejercicio, fase del movimiento y calidad instantánea.
+- Barra inferior: tiempo activo + notificación de errores.
 
-```powershell
-python -m venv .venv; .\.venv\Scripts\Activate.ps1; pip install -r embedded/requirements.txt; uvicorn app.api.main:app --reload --host 0.0.0.0 --port 8000
-```
-
-## API Endpoints
-- GET /health
-- POST /posture
-- POST /biometrics
-- GET /biometrics/last
-- POST /config
-- POST /voice/test
-- POST /training/pose/sample
-- POST /training/voice/sample
-
-All responses use { success, data, error }.
-
-## Training data collection
-- Capture pose sample: `python scripts/collect_pose_sample.py sentadilla --notes "buen angulo"`
-- Registrar sinonimo de voz: `python scripts/add_voice_synonym.py "inicia cardio" start_routine`
-- Grabar y registrar frase (audio + sinonimo): `python scripts/record_and_register_voice.py "inicia rutina" start_routine --output embedded/app/data/training/voice`
-- Entrenar clasificador de intents: `python scripts/train_voice_intent.py`
-- Listener en vivo (requiere Vosk, modelo entrenado y VOICE_LISTENER_ENABLED=1): `python scripts/run_voice_listener.py`
-
-Pose samples se guardan en `embedded/app/data/training/pose/`, mientras que voz en `embedded/app/data/training/voice/`. Configura `USE_VOSK_OFFLINE=1` y `VOSK_MODEL_PATH` en `.env` despues de descargar un modelo adecuado (por ejemplo `vosk-model-small-es-0.42`). Si entrenas un clasificador personalizado, apunta `VOICE_INTENT_MODEL_PATH` al archivo `.joblib` generado para habilitar el fallback inteligente o habilita el listener embebido con `VOICE_LISTENER_ENABLED=1`.
-
-## CLI fallback
-If GUI isn't available, run:
-
-```powershell
+CLI equivalente:
+```bash
 python -m app.gui.mirror_gui --cli --base-url http://127.0.0.1:8000
 ```
+
+## Endpoints principales
+- `GET /health`
+- `POST /posture` → FPS, latencias p50/p95, rep_totals, fase y feedback granular.
+- `POST /biometrics` / `GET /biometrics/last` → FC, pasos, zona (`zone_color`), estado Fitbit y `staleness_sec`.
+- `POST /session/start|pause|stop|exercise` → control de sesión.
+- `GET /session/status` → datos vivos: `status`, `last_command`, `duration_active_sec`, `rep_totals`, `feedback`.
+- `GET /session/last` y `GET /session/history?limit=N` → histórico persistido en SQLite con `avg_hr`, `max_hr`, `total_reps`, `avg_quality`.
+
+Todas las respuestas siguen la forma `{ "success": bool, "data": ..., "error": str|None }`.
+
+## Configuración de visión y repeticiones
+Variables en `.env.example` permiten ajustar cámara y umbrales por ejercicio:
+```
+CAMERA_INDEX, CAMERA_WIDTH, CAMERA_HEIGHT, CAMERA_FPS, MODEL_COMPLEXITY
+VISION_MOCK, POSE_LATENCY_WINDOW, POSE_QUALITY_WINDOW
+SQUAT_DOWN_ANGLE / SQUAT_UP_ANGLE
+PUSHUP_DOWN_ANGLE / PUSHUP_UP_ANGLE
+CRUNCH_DOWN_ANGLE / CRUNCH_UP_ANGLE
+```
+`PoseEstimator` expone `reset_session()` y `get_average_quality()` para métricas por sesión.
+
+## Biometría y almacenamiento
+- Tokens Fitbit en `smartmirror.db`.
+- Métricas recientes se guardan en `biometric_sample` (FC, pasos, `zone_name`, `fitbit_status`, etc.).
+- Zona cardíaca coloreada usando fórmula de Karvonen (`HR_RESTING`, `HR_MAX`).
+- Estado Fitbit (`fitbit_status_level`) cambia a amarillo/rojo si los datos están caducos o hay error.
+
+## Control por voz
+- Listener (`scripts/run_voice_listener.py`) usa Vosk + clasificadores entrenables (`app/voice/recognizer.py`).
+- Intents soportados: `start`, `start_routine`, `pause`, `stop`, `next`.
+  - `start/start_routine` → `/session/start` (ciclo comienza en sentadilla).
+  - `pause` → `/session/pause`
+  - `stop` → `/session/stop`
+  - `next` → rota entre `squat`, `pushup`, `crunch` (`/session/exercise`).
+- `last_command` y hora de ejecución aparecen en el HUD al instante.
+
+### Entrenamiento y registro de voz
+- Añadir sinónimo: `python scripts/add_voice_synonym.py "inicia cardio" start_routine`
+- Grabación etiquetada: `python scripts/record_and_register_voice.py "inicia rutina" start_routine`
+- Re-entrenar: `python scripts/train_voice_intent.py`
+- Listener standalone: `python scripts/run_voice_listener.py --base-url http://127.0.0.1:8000`
+
+## Métricas y validación
+- **Conteo de repeticiones:** objetivo ≤ 1 error cada 10 reps. Validar por ejercicio observando `rep_totals` vs conteo manual.
+- **Latencia visión:** revisar `latency_ms_p50` / `latency_ms_p95` (en `POST /posture` y logs). Meta \< 120 ms p50.
+- **FPS pipeline:** campo `fps` en `POST /posture` (esperado 12–15 FPS en la Pi).
+- **Biometría:** `staleness_sec` debe permanecer \< `FITBIT_POLL_INTERVAL * 2` cuando Fitbit está sincronizado.
+- **Voz:** registrar tasa de aciertos con `scripts/run_voice_listener.py --verbose` y comparar contra `last_command` en el HUD.
+Documenta los resultados en `docs` o en tu bitácora de capítulos según corresponda.

@@ -1,87 +1,208 @@
 """Session control endpoints.
 
-Allows starting/stopping a workout session and selecting the active exercise.
+Provides start/pause/stop controls, persistence, and history endpoints.
 """
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any
+from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from loguru import logger
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
-from app.core.dal import add_session_metrics
-from app.api.schemas import Envelope
+from app.core.dal import (
+    add_session_metrics,
+    get_last_session_metrics,
+    get_session_history,
+)
+from app.api.schemas import Envelope, SessionMetricsOutput
 from app.api.routers.posture import pose_estimator
-
 
 router = APIRouter()
 
-# Minimal in-memory session state
-_state: Dict[str, Any] = {
-    "started_at": None,  # datetime|None
-    "rep_start": 0,
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _mark_command(name: str) -> None:
+    ts = _now()
+    _state["last_command"] = name
+    _state["last_command_ts"] = ts
+
+
+def _accumulate_active(now: Optional[datetime] = None) -> None:
+    now = now or _now()
+    active_started = _state.get("active_started_at")
+    if _state.get("status") == "active" and isinstance(active_started, datetime):
+        elapsed = (now - active_started).total_seconds()
+        _state["accum_active"] = float(_state.get("accum_active", 0.0) or 0.0) + max(0.0, elapsed)
+        _state["active_started_at"] = None
+
+
+def _active_duration(now: Optional[datetime] = None) -> int:
+    now = now or _now()
+    accum = float(_state.get("accum_active", 0.0) or 0.0)
+    active_started = _state.get("active_started_at")
+    if _state.get("status") == "active" and isinstance(active_started, datetime):
+        accum += max(0.0, (now - active_started).total_seconds())
+    return max(0, int(accum))
+
+
+_state: dict[str, Any] = {
+    "started_at": None,
+    "status": "idle",
+    "active_started_at": None,
+    "accum_active": 0.0,
+    "exercise": pose_estimator.exercise,
+    "last_command": None,
+    "last_command_ts": None,
 }
 
 
 @router.post("/session/start", response_model=Envelope)
 def session_start(payload: Optional[dict] = None) -> Envelope:
-    ex = (payload or {}).get("exercise") if isinstance(payload, dict) else None
-    if ex:
-        pose_estimator.exercise = str(ex).lower()
-        pose_estimator.phase = "up"
-        pose_estimator.rep_count = 0
-    _state["started_at"] = datetime.now(timezone.utc)
-    _state["rep_start"] = pose_estimator.rep_count
-    logger.info("Session started exercise={} rep_base={}", pose_estimator.exercise, _state["rep_start"])
-    return Envelope(success=True, data={
-        "exercise": pose_estimator.exercise,
-        "started_at": _state["started_at"].isoformat(),
-    })
+    data = payload or {}
+    exercise = data.get("exercise")
+    reset_totals = bool(data.get("reset", True))
+    resume = bool(data.get("resume", False))
+
+    if _state.get("started_at") and _state.get("status") == "paused" and (resume or not reset_totals):
+        now = _now()
+        _state["status"] = "active"
+        _state["active_started_at"] = now
+        _mark_command("resume")
+        logger.info("Session resumed")
+        return Envelope(
+            success=True,
+            data={
+                "status": "active",
+                "exercise": _state.get("exercise"),
+                "started_at": (_state.get("started_at") or now).isoformat(),
+            },
+        )
+
+    if exercise:
+        pose_estimator.set_exercise(str(exercise), reset=True)
+    else:
+        pose_estimator.reset_session(
+            preserve_totals=not reset_totals,
+            exercise=pose_estimator.exercise,
+        )
+
+    now = _now()
+    _state.update(
+        {
+            "started_at": now,
+            "status": "active",
+            "active_started_at": now,
+            "accum_active": 0.0,
+            "exercise": pose_estimator.exercise,
+        }
+    )
+    _mark_command("start")
+    logger.info("Session started exercise={} reset_totals={}", pose_estimator.exercise, reset_totals)
+    return Envelope(
+        success=True,
+        data={
+            "exercise": pose_estimator.exercise,
+            "started_at": now.isoformat(),
+            "status": "active",
+        },
+    )
+
+
+@router.post("/session/pause", response_model=Envelope)
+def session_pause() -> Envelope:
+    if not isinstance(_state.get("started_at"), datetime):
+        return Envelope(success=False, error="no_active_session")
+    if _state.get("status") != "active":
+        return Envelope(success=True, data={"status": _state.get("status")})
+    now = _now()
+    _accumulate_active(now)
+    _state["status"] = "paused"
+    _mark_command("pause")
+    logger.info("Session paused")
+    return Envelope(
+        success=True,
+        data={
+            "status": "paused",
+            "duration_active_sec": _active_duration(now),
+        },
+    )
 
 
 @router.post("/session/stop", response_model=Envelope)
 def session_stop(request: Request, db: Session = Depends(get_db)) -> Envelope:
-    if not _state.get("started_at"):
+    started = _state.get("started_at")
+    if not isinstance(started, datetime):
         return Envelope(success=False, error="no_active_session")
-    started = _state["started_at"]
-    duration = int((datetime.now(timezone.utc) - started).total_seconds())
-    reps = max(0, pose_estimator.rep_count - int(_state.get("rep_start", 0)))
+
+    now = _now()
+    _accumulate_active(now)
+    duration_total = max(0, int((now - started).total_seconds()))
+    duration_active = _active_duration(now)
+    rep_breakdown = dict(pose_estimator.rep_totals)
+    total_reps = sum(rep_breakdown.values())
+    current_reps = pose_estimator.rep_count
+    avg_quality = pose_estimator.get_average_quality()
+
     avg_hr = 0
     max_hr = 0
     fitbit_client = getattr(request.app.state, "fitbit_client", None)
-    if fitbit_client and started:
+    if fitbit_client and isinstance(started, datetime):
         try:
             samples = fitbit_client.get_metrics_since(started)
             if samples:
                 values = [m.heart_rate_bpm for m in samples]
                 avg_hr = int(sum(values) / len(values))
                 max_hr = max(values)
-        except Exception:
-            avg_hr = 0
-            max_hr = 0
-    # Persist minimal session metrics (avg_hr/max_hr/avg_quality left as 0 for now)
+        except Exception as exc:  # pragma: no cover - telemetry only
+            logger.warning("Failed to compute HR stats for session_stop: {}", exc)
+
     try:
         add_session_metrics(
             db,
             started_at_utc=started.replace(tzinfo=None),
-            duration_sec=duration,
+            ended_at_utc=now.replace(tzinfo=None),
+            duration_sec=duration_total,
+            duration_active_sec=duration_active,
             avg_hr=avg_hr,
             max_hr=max_hr,
-            avg_quality=0.0,
+            avg_quality=avg_quality,
+            total_reps=total_reps,
+            exercise=_state.get("exercise"),
         )
-    except Exception as exc:  # pragma: no cover
+    except Exception as exc:  # pragma: no cover - persistence fallback
         logger.warning("Failed to persist session metrics: {}", exc)
-    _state["started_at"] = None
-    _state["rep_start"] = 0
-    return Envelope(success=True, data={
-        "duration_sec": duration,
-        "reps": reps,
-        "avg_hr": avg_hr,
-        "max_hr": max_hr,
-    })
+
+    pose_estimator.reset_session(exercise=_state.get("exercise"), preserve_totals=False)
+    _state.update(
+        {
+            "started_at": None,
+            "status": "idle",
+            "active_started_at": None,
+            "accum_active": 0.0,
+        }
+    )
+    _mark_command("stop")
+    logger.info("Session stopped duration={} reps={}", duration_total, total_reps)
+
+    return Envelope(
+        success=True,
+        data={
+            "duration_sec": duration_total,
+            "duration_active_sec": duration_active,
+            "avg_hr": avg_hr,
+            "max_hr": max_hr,
+            "avg_quality": avg_quality,
+            "rep_count": current_reps,
+            "total_reps": total_reps,
+            "rep_breakdown": rep_breakdown,
+        },
+    )
 
 
 @router.post("/session/exercise", response_model=Envelope)
@@ -89,22 +210,60 @@ def set_exercise(payload: dict) -> Envelope:
     ex = (payload or {}).get("exercise")
     if not ex:
         return Envelope(success=False, error="missing_exercise")
-    pose_estimator.exercise = str(ex).lower()
-    pose_estimator.phase = "up"
-    pose_estimator.rep_count = 0
-    _state["rep_start"] = 0
-    logger.info("Exercise set to {} and counters reset", pose_estimator.exercise)
-    return Envelope(success=True, data={"exercise": pose_estimator.exercise})
+    reset = bool((payload or {}).get("reset", False))
+    pose_estimator.set_exercise(str(ex), reset=reset)
+    _state["exercise"] = pose_estimator.exercise
+    _mark_command("next")
+    logger.info("Exercise changed to {} reset={}", pose_estimator.exercise, reset)
+    return Envelope(success=True, data={"exercise": pose_estimator.exercise, "reset": reset})
 
 
 @router.get("/session/status", response_model=Envelope)
 def session_status() -> Envelope:
     started = _state.get("started_at")
-    duration = int((datetime.now(timezone.utc) - started).total_seconds()) if started else 0
-    return Envelope(success=True, data={
-        "exercise": pose_estimator.exercise,
-        "phase": pose_estimator.phase,
-        "rep_count": pose_estimator.rep_count,
-        "started_at": started.isoformat() if started else None,
-        "duration_sec": duration,
-    })
+    now = _now()
+    duration = max(0, int((now - started).total_seconds())) if isinstance(started, datetime) else 0
+    phase_label = pose_estimator.get_phase_label()
+    return Envelope(
+        success=True,
+        data={
+            "status": _state.get("status"),
+            "exercise": pose_estimator.exercise,
+            "phase": pose_estimator.phase,
+            "phase_label": phase_label,
+            "rep_count": pose_estimator.rep_count,
+            "rep_totals": pose_estimator.rep_totals,
+            "avg_quality": pose_estimator.get_average_quality(),
+            "feedback": pose_estimator.feedback,
+            "feedback_code": pose_estimator.feedback_code,
+            "started_at": started.isoformat() if isinstance(started, datetime) else None,
+            "duration_sec": duration,
+            "duration_active_sec": _active_duration(now),
+            "last_command": _state.get("last_command"),
+            "last_command_ts": (
+                _state["last_command_ts"].isoformat() if isinstance(_state.get("last_command_ts"), datetime) else None
+            ),
+        },
+    )
+
+
+@router.get("/session/last", response_model=Envelope)
+def session_last(db: Session = Depends(get_db)) -> Envelope:
+    row = get_last_session_metrics(db)
+    if not row:
+        return Envelope(success=True, data=None)
+    payload = SessionMetricsOutput.model_validate(row)
+    return Envelope(success=True, data=payload.model_dump(by_alias=True))
+
+
+@router.get("/session/history", response_model=Envelope)
+def session_history(
+    db: Session = Depends(get_db),
+    limit: int = Query(10, ge=1, le=100),
+) -> Envelope:
+    rows = get_session_history(db, limit=limit)
+    items = [
+        SessionMetricsOutput.model_validate(row).model_dump(by_alias=True)
+        for row in rows
+    ]
+    return Envelope(success=True, data={"sessions": items, "count": len(items)})
