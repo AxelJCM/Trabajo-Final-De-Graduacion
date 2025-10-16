@@ -57,6 +57,7 @@ class PostureOutput(BaseModel):
     current_exercise_reps: int | None = None
     rep_totals: dict[str, int] | None = None
     timestamp_utc: float | None = None
+    frame_b64: str | None = None
 
 
 class BiometricsInput(BaseModel):

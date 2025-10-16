@@ -4,6 +4,7 @@ from __future__ import annotations
 import math
 import time
 from collections import deque
+import base64
 from dataclasses import dataclass, asdict, field
 from statistics import median
 from typing import Dict, Iterable, List, Optional, Tuple
@@ -64,6 +65,7 @@ class PoseResult:
     current_exercise_reps: int
     rep_totals: Dict[str, int] = field(default_factory=dict)
     timestamp_utc: float = field(default_factory=lambda: time.time())
+    frame_b64: Optional[str] = None
 
     def to_dict(self) -> dict:
         result = asdict(self)
@@ -126,7 +128,7 @@ class PoseEstimator:
     def analyze_frame(self) -> PoseResult:
         """Capture a frame, compute joints/angles, rep counting, and metrics."""
         start = time.perf_counter()
-        joints, angles = self._process_frame()
+        joints, angles, frame = self._process_frame()
         latency_ms = (time.perf_counter() - start) * 1000.0
         self._latencies.append(latency_ms)
         fps = self._update_fps()
@@ -142,6 +144,8 @@ class PoseEstimator:
         feedback_code, feedback = self._feedback_for_angles(angles, quality)
         self.feedback_code = feedback_code
         self.feedback = feedback
+
+        frame_b64 = self._encode_frame(frame)
 
         result = PoseResult(
             fps=round(fps, 2),
@@ -160,6 +164,7 @@ class PoseEstimator:
             rep_count=self.rep_count,
             current_exercise_reps=self.rep_totals.get(self.exercise, 0),
             rep_totals=dict(self.rep_totals),
+            frame_b64=frame_b64,
         )
         return result
 
@@ -167,6 +172,18 @@ class PoseEstimator:
         if not self._quality_count:
             return 0.0
         return self._quality_sum / self._quality_count
+
+    def get_fps_avg(self) -> float:
+        if not self._fps_window:
+            return 0.0
+        return sum(self._fps_window) / len(self._fps_window)
+
+    def get_latency_samples_count(self) -> int:
+        return len(self._latencies)
+
+    def get_latency_p50_p95_ms(self) -> Tuple[float, float]:
+        """Return latency percentiles in milliseconds."""
+        return self._latency_percentiles()
 
     def reset_session(self, exercise: Optional[str] = None, *, preserve_totals: bool = False) -> None:
         if exercise:
@@ -226,7 +243,7 @@ class PoseEstimator:
         self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, int(self.settings.camera_height))
         self._cap.set(cv2.CAP_PROP_FPS, int(self.settings.camera_fps))
 
-    def _process_frame(self) -> Tuple[List[PoseJoint], PoseAngles]:
+    def _process_frame(self) -> Tuple[List[PoseJoint], PoseAngles, Optional[np.ndarray]]:
         if self._mock:
             return self._mock_frame()
         assert self._cap is not None and cv2 is not None and mp is not None
@@ -238,7 +255,7 @@ class PoseEstimator:
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = self._pose.process(rgb) if self._pose else None  # type: ignore[attr-defined]
         if not results or not results.pose_landmarks:
-            return [], PoseAngles()
+            return [], PoseAngles(), frame
         landmarks = results.pose_landmarks.landmark
         points = self._landmark_points(landmarks)
         joints = [
@@ -246,7 +263,7 @@ class PoseEstimator:
             for name, pt in points.items()
         ]
         angles = self._compute_angles(points)
-        return joints, angles
+        return joints, angles, frame
 
     def _landmark_points(self, landmarks) -> Dict[str, Tuple[float, float, float, float]]:
         if mp is None:
@@ -423,7 +440,7 @@ class PoseEstimator:
             return "good", "Buen ritmo"
         return "keep_trying", "Sigue así, estabiliza el movimiento"
 
-    def _mock_frame(self) -> Tuple[List[PoseJoint], PoseAngles]:
+    def _mock_frame(self) -> Tuple[List[PoseJoint], PoseAngles, Optional[np.ndarray]]:
         self._mock_progress = (self._mock_progress + 0.12) % (2 * math.pi)
         depth = (math.sin(self._mock_progress) + 1) / 2  # 0..1
         thresholds = self._thresholds.get(self.exercise, self._thresholds["squat"])
@@ -475,7 +492,62 @@ class PoseEstimator:
             shoulder_hip_alignment=shoulder_alignment,
             torso_forward=torso_forward,
         )
-        return joints, angles
+        frame = self._generate_mock_frame(angle_value, depth)
+        return joints, angles, frame
+
+    def _generate_mock_frame(self, angle_value: float, depth: float) -> Optional[np.ndarray]:
+        if cv2 is None:
+            return None
+        height, width = 1280, 720
+        frame = np.zeros((height, width, 3), dtype=np.uint8)
+        gradient = int(60 + depth * 140)
+        frame[:, :] = (25, 25 + gradient, 40 + gradient)
+        center_x = width // 2
+        center_y = int(height * (0.35 + 0.25 * math.sin(self._mock_progress)))
+        cv2.circle(frame, (center_x, center_y), 80, (255, 255, 255), -1)
+        cv2.putText(
+            frame,
+            f"{self.exercise.upper()} {int(angle_value)}°",
+            (40, height - 40),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1.2,
+            (255, 255, 255),
+            2,
+            cv2.LINE_AA,
+        )
+        return frame
+
+    def _apply_rotation(self, frame: np.ndarray, angle: int) -> np.ndarray:
+        if cv2 is None:
+            return frame
+        normalized = angle % 360
+        if normalized == 90:
+            return cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+        if normalized == 180:
+            return cv2.rotate(frame, cv2.ROTATE_180)
+        if normalized == 270:
+            return cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+        return frame
+
+    def _encode_frame(self, frame: Optional[np.ndarray]) -> Optional[str]:
+        if frame is None or cv2 is None:
+            return None
+        frame_to_encode = frame.copy()
+        rotate = int(getattr(self.settings, "hud_frame_rotate", 0))
+        frame_to_encode = self._apply_rotation(frame_to_encode, rotate)
+        h, w = frame_to_encode.shape[:2]
+        target_long_side = 1280
+        scale = target_long_side / float(max(h, w))
+        if scale < 1.0:
+            frame_to_encode = cv2.resize(
+                frame_to_encode,
+                (int(w * scale), int(h * scale)),
+                interpolation=cv2.INTER_AREA,
+            )
+        success, buffer = cv2.imencode(".jpg", frame_to_encode, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+        if not success:
+            return None
+        return base64.b64encode(buffer).decode("ascii")
 
     # --- context -------------------------------------------------------
 

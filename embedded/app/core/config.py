@@ -79,6 +79,7 @@ class Settings(BaseModel):
     pushup_up_angle: float = float(os.getenv("PUSHUP_UP_ANGLE", "150"))
     crunch_down_angle: float = float(os.getenv("CRUNCH_DOWN_ANGLE", "50"))
     crunch_up_angle: float = float(os.getenv("CRUNCH_UP_ANGLE", "150"))
+    hud_frame_rotate: int = int(os.getenv("HUD_FRAME_ROTATE", "0"))
 
 
 @lru_cache

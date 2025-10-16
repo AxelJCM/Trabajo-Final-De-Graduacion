@@ -23,3 +23,6 @@ async def test_posture_returns_data_without_camera():
     assert "phase_label" in d and isinstance(d["phase_label"], str)
     assert "quality_avg" in d
     assert "current_exercise_reps" in d
+    assert "frame_b64" in d
+    if d["frame_b64"] is not None:
+        assert isinstance(d["frame_b64"], str)
