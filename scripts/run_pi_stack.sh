@@ -30,6 +30,22 @@ start_process() {
 
 start_process api uvicorn app.api.main:app --host 0.0.0.0 --port 8000 --log-level info
 
+wait_for_api() {
+  local attempts=0
+  local max_attempts="${1:-20}"
+  until curl -sSf "${BASE_URL}/health" >/dev/null 2>&1; do
+    attempts=$((attempts + 1))
+    if [ "${attempts}" -ge "${max_attempts}" ]; then
+      echo "[run_pi_stack] API did not become ready after ${attempts} attempts" >&2
+      return 1
+    fi
+    sleep 1
+  done
+  echo "[run_pi_stack] API ready (after ${attempts} retries)"
+}
+
+wait_for_api || exit 1
+
 # Voice listener (best effort; falls back gracefully if deps missing)
 start_process voice python "${ROOT_DIR}/scripts/run_voice_listener.py" --base-url "${BASE_URL}"
 
