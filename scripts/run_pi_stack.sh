@@ -8,9 +8,26 @@ APP_DIR="${ROOT_DIR}/embedded"
 LOG_DIR="${APP_DIR}/app/data/logs"
 mkdir -p "${LOG_DIR}"
 
+PYTHON_BIN="${PYTHON_BIN:-python3}"
+
+if [ ! -d "${APP_DIR}/.venv" ]; then
+  echo "[run_pi_stack] creating virtualenv at ${APP_DIR}/.venv"
+  "${PYTHON_BIN}" -m venv "${APP_DIR}/.venv" --system-site-packages
+  CREATED_VENV=1
+else
+  CREATED_VENV=0
+fi
+
 if [ -f "${APP_DIR}/.venv/bin/activate" ]; then
   # shellcheck disable=SC1090
   source "${APP_DIR}/.venv/bin/activate"
+fi
+
+if [ "${CREATED_VENV}" -eq 1 ] || [ ! -f "${APP_DIR}/.venv/.deps_installed" ] || [ "${FORCE_PIP_INSTALL:-0}" = "1" ]; then
+  echo "[run_pi_stack] installing Python dependencies (this may take a minute)"
+  python -m pip install --upgrade pip >/dev/null 2>&1 || true
+  python -m pip install -r "${APP_DIR}/requirements.txt"
+  touch "${APP_DIR}/.venv/.deps_installed"
 fi
 
 if [ -f "${APP_DIR}/.env" ]; then
