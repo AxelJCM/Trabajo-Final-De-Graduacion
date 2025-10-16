@@ -13,6 +13,13 @@ if [ -f "${APP_DIR}/.venv/bin/activate" ]; then
   source "${APP_DIR}/.venv/bin/activate"
 fi
 
+if [ -f "${APP_DIR}/.env" ]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "${APP_DIR}/.env"
+  set +a
+fi
+
 export PYTHONPATH="${APP_DIR}"
 BASE_URL="${BASE_URL:-http://127.0.0.1:8000}"
 HUD_MODE="${HUD_MODE:-cli}"  # cli | overlay
