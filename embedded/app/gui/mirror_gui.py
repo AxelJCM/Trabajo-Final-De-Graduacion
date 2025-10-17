@@ -6,9 +6,9 @@ import asyncio
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
-try:
+try:  # Optional dependency (overlay mode)
     from PyQt5 import QtCore, QtGui, QtWidgets  # type: ignore
 except Exception:  # pragma: no cover
     QtWidgets = None  # type: ignore
@@ -53,15 +53,21 @@ class HudState:
 class HudStyle:
     FRAME_SCALE = 0.9
     BAR_OPACITY = 0.5
-    CHIP_OPACITY = 0.52
+    CHIP_OPACITY = 0.55
     TOAST_DURATION = 3.0
     ACTIVE_INTERVAL = 6
-    IDLE_INTERVAL = 16
-    TIMER_INTERVAL_MS = 80
+    IDLE_INTERVAL = 18
+    TIMER_INTERVAL_MS = 80  # ~12.5 Hz
     FONT_FAMILY = "Roboto"
 
     @staticmethod
-    def text_primary(alpha: int = 230) -> QtGui.QColor:
+    def text_primary(alpha: int = 235) -> QtGui.QColor:
+        color = QtGui.QColor(255, 255, 255)
+        color.setAlpha(alpha)
+        return color
+
+    @staticmethod
+    def text_secondary(alpha: int = 200) -> QtGui.QColor:
         color = QtGui.QColor(255, 255, 255)
         color.setAlpha(alpha)
         return color
@@ -73,23 +79,26 @@ class HudStyle:
             "yellow": QtGui.QColor("#FFC107"),
             "red": QtGui.QColor("#F44336"),
         }
-        return QtGui.QColor(palette.get(level, QtGui.QColor("#607D8B")))
+        return palette.get(level, QtGui.QColor("#607D8B"))
 
 
 class OverlayWindow(QtWidgets.QWidget):  # type: ignore
+    """Qt overlay window that renders the video frame and HUD layers."""
+
     def __init__(self, base_url: str, *, debug: bool = False):
         super().__init__()
         self.base_url = base_url.rstrip("/")
+               
         self.debug = debug
         self.state = HudState({}, {}, {})
         self.last_error: Optional[str] = None
         self.frame_pixmap: Optional[QtGui.QPixmap] = None
         self._client = requests.Session() if requests else None
         self._tick = 0
-        self._poll_lock = False
         self._session_interval = HudStyle.ACTIVE_INTERVAL
+        self._poll_lock = False
         self._toast_message: Optional[str] = None
-        self._toast_until: float = 0.0
+        self._toast_until = 0.0
         self._last_feedback_code: Optional[str] = None
         self._latest_metrics: Dict[str, Any] = {}
 
@@ -101,7 +110,7 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
         self.timer.timeout.connect(self.poll)
         self.timer.start(HudStyle.TIMER_INTERVAL_MS)
 
-    # ---------------------------- paint helpers ---------------------------
+    # ------------------------------------------------------------------ paint
 
     def paintEvent(self, event):  # pragma: no cover - GUI only
         painter = QtGui.QPainter(self)
@@ -121,11 +130,12 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
         else:
             painter.fillRect(self.rect(), QtGui.QColor(0, 0, 0))
 
-        margin = max(18, int(min(self.width(), self.height()) * 0.04))
+        portrait = self.height() > self.width()
+        margin = max(20, int(min(self.width(), self.height()) * 0.035))
         bar_width = int(self.width() * HudStyle.FRAME_SCALE)
         bar_x = (self.width() - bar_width) // 2
-        top_height = max(48, int(self.height() * 0.055))
-        bottom_height = max(48, int(self.height() * 0.055))
+        top_height = max(54, int(self.height() * 0.06))
+        bottom_height = max(50, int(self.height() * 0.055))
 
         top_rect = QtCore.QRect(bar_x, margin, bar_width, top_height)
         bottom_rect = QtCore.QRect(
@@ -135,16 +145,20 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
             bottom_height,
         )
 
-        self._draw_top_bar(painter, top_rect)
+        if portrait:
+            self._draw_top_bar_multiline(painter, top_rect)
+        else:
+            self._draw_top_bar_standard(painter, top_rect)
+
         status = (self.state.session or {}).get("status", "idle")
         if status == "active":
             self._draw_bottom_bar(painter, bottom_rect)
         elif self.debug:
             self._draw_debug_metrics(painter, bottom_rect)
 
-    # ----------------------------- polling --------------------------------
+    # ----------------------------------------------------------------- polling
 
-    def poll(self) -> None:
+    def poll(self) -> None:  # pragma: no cover - GUI only
         if not self._client or self._poll_lock:
             return
         self._poll_lock = True
@@ -162,18 +176,17 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
         if not self._client:
             return
         try:
-            response = self._client.get(f"{self.base_url}/session/status", timeout=1.2)
-            if response.ok:
-                self.state.session = response.json().get("data", {})
+            resp = self._client.get(f"{self.base_url}/session/status", timeout=1.2)
+            if resp.ok:
+                self.state.session = resp.json().get("data", {})
         except Exception as exc:  # pragma: no cover
             self.last_error = f"session: {exc}"
         try:
-            response = self._client.get(f"{self.base_url}/biometrics/last", timeout=1.2)
-            if response.ok:
-                self.state.biometrics = response.json().get("data", {})
+            resp = self._client.get(f"{self.base_url}/biometrics/last", timeout=1.2)
+            if resp.ok:
+                self.state.biometrics = resp.json().get("data", {})
         except Exception as exc:  # pragma: no cover
             self.last_error = f"biometrics: {exc}"
-
         status = (self.state.session or {}).get("status", "idle")
         self._session_interval = HudStyle.ACTIVE_INTERVAL if status == "active" else HudStyle.IDLE_INTERVAL
 
@@ -181,9 +194,9 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
         if not self._client:
             return
         try:
-            response = self._client.post(f"{self.base_url}/posture", json={}, timeout=1.2)
-            if response.ok:
-                posture = response.json().get("data", {})
+            resp = self._client.post(f"{self.base_url}/posture", json={}, timeout=1.2)
+            if resp.ok:
+                posture = resp.json().get("data", {})
                 self.state.posture = posture
                 self._latest_metrics = {
                     "fps": posture.get("fps"),
@@ -225,220 +238,102 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
             self._toast_message = None
             self._last_feedback_code = None
 
-    # ----------------------------- drawing --------------------------------
+    # ------------------------------------------------------------ draw helpers
 
-    def _draw_top_bar(self, painter: QtGui.QPainter, rect: QtCore.QRect) -> None:
-        portrait = self.height() > self.width()
-        if portrait:
-            self._draw_top_bar_multiline(painter, rect)
-            return
-
-
-        portrait = self.height() > self.width()
-        if portrait:
-            self._draw_top_bar_multiline(painter, rect)
-            return
+    def _draw_panel(self, painter: QtGui.QPainter, rect: QtCore.QRect, radius: int = 16) -> None:
         painter.save()
         bg = QtGui.QColor(0, 0, 0)
         bg.setAlpha(int(255 * HudStyle.BAR_OPACITY))
         painter.setPen(QtCore.Qt.NoPen)
         painter.setBrush(bg)
-        painter.drawRoundedRect(rect, 16, 16)
+        painter.drawRoundedRect(rect, radius, radius)
         painter.restore()
 
+    # ----------------------- top bar (landscape) -----------------------------
+
+    def _draw_top_bar_standard(self, painter: QtGui.QPainter, rect: QtCore.QRect) -> None:
+        self._draw_panel(painter, rect, radius=16)
         session = self.state.session or {}
         posture = self.state.posture or {}
         biometrics = self.state.biometrics or {}
 
         font_main = QtGui.QFont(HudStyle.FONT_FAMILY, max(18, int(rect.height() * 0.42)))
         font_chip = QtGui.QFont(HudStyle.FONT_FAMILY, max(13, int(rect.height() * 0.32)))
-
-        painter.setFont(font_chip)
-        metrics_chip = painter.fontMetrics()
-        chip_padding = 12
-        spacing = 10
-
-        chips: list[tuple[str, Optional[QtGui.QColor], int]] = []
-        steps = biometrics.get("steps")
-        if steps is not None:
-            text = f"Pasos: {steps}"
-            width = metrics_chip.horizontalAdvance(text) + chip_padding * 2
-            chips.append((text, None, width))
-        hr = biometrics.get("heart_rate_bpm")
-        if hr is not None:
-            text = f"FC: {hr} bpm"
-            width = metrics_chip.horizontalAdvance(text) + chip_padding * 2
-            chips.append((text, None, width))
-        level = biometrics.get("fitbit_status_level", "yellow")
-        icon = biometrics.get("fitbit_status_icon") or "â"
-        fitbit_color = HudStyle.fitbit_color(level)
-        fitbit_color.setAlpha(int(255 * HudStyle.CHIP_OPACITY))
-        text = f"{icon} Fitbit {level}"
-        width = metrics_chip.horizontalAdvance(text) + chip_padding * 2
-        chips.append((text, fitbit_color, width))
-
-        chips_total = sum(width for _, _, width in chips) + spacing * (len(chips) - 1 if chips else 0)
-        available_width = rect.width() - chips_total - spacing * 2
-
         painter.setFont(font_main)
         metrics_main = painter.fontMetrics()
 
-        left_width = max(90, min(int(rect.width() * 0.32), available_width - 120))
-        left_width = min(left_width, rect.width() - chips_total - spacing * 3)
-        left_width = max(80, left_width)
+        left_rect = QtCore.QRect(rect.x() + int(rect.width() * 0.02), rect.y(), int(rect.width() * 0.3), rect.height())
+        center_rect = QtCore.QRect(rect.x() + int(rect.width() * 0.32), rect.y(), int(rect.width() * 0.38), rect.height())
+        right_rect = QtCore.QRect(rect.x() + int(rect.width() * 0.7), rect.y(), int(rect.width() * 0.28), rect.height())
 
-        center_left = rect.x() + left_width + spacing
-        center_available = rect.width() - left_width - chips_total - spacing * 3
-        if center_available < 80:
-            deficit = 80 - center_available
-            left_width = max(80, left_width - deficit)
-            center_left = rect.x() + left_width + spacing
-            center_available = rect.width() - left_width - chips_total - spacing * 3
-            center_available = max(60, center_available)
-
-        left_rect = QtCore.QRect(rect.x() + spacing, rect.y(), left_width, rect.height())
         status = (session.get("status") or "idle").title()
-        duration_total = _fmt_duration(session.get("duration_sec"))
-        left_text = f"SesiÃ³n: {status} â¢ {duration_total}"
-        left_text = metrics_main.elidedText(left_text, QtCore.Qt.ElideRight, left_rect.width())
+        duration = _fmt_duration(session.get("duration_sec"))
+        left_text = f"Sesion: {status} • {duration}"
         painter.setPen(HudStyle.text_primary())
-        painter.drawText(left_rect, QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft, left_text)
+        painter.drawText(left_rect, QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft, metrics_main.elidedText(left_text, QtCore.Qt.ElideRight, left_rect.width()))
 
-        center_rect = QtCore.QRect(center_left, rect.y(), center_available, rect.height())
         exercise = posture.get("exercise") or session.get("exercise") or "--"
         reps = posture.get("rep_count", 0)
         phase = posture.get("phase_label") or posture.get("phase") or "--"
-        center_text = f"Ejercicio: {exercise} â¢ Reps: {reps} â¢ Fase: {phase}"
-        center_text = metrics_main.elidedText(center_text, QtCore.Qt.ElideRight, max(40, center_available))
-        painter.drawText(center_rect, QtCore.Qt.AlignCenter, center_text)
-
-        if needs_multiline:
-            self._draw_top_bar_multiline(painter, rect)
-            return
+        center_text = f"Ejercicio: {exercise} • Reps: {reps} • Fase: {phase}"
+        painter.drawText(center_rect, QtCore.Qt.AlignCenter, metrics_main.elidedText(center_text, QtCore.Qt.ElideRight, center_rect.width()))
 
         painter.setFont(font_chip)
-        x_cursor = rect.right() - spacing
-        for text, color, width in reversed(chips):
-            available = x_cursor - (center_rect.right() + spacing)
-            max_text_width = max(30, available - (chip_padding * 2))
-            elided = metrics_chip.elidedText(text, QtCore.Qt.ElideRight, max_text_width)
-            chip_color = color or QtGui.QColor(0, 0, 0, int(255 * HudStyle.CHIP_OPACITY))
-            x_cursor = self._draw_chip(
-                painter,
-                elided,
-                x_cursor,
-                rect,
-                max(26, int(rect.height() * 0.6)),
-                HudStyle.text_primary(),
-                bg_color=chip_color,
-                padding_x=chip_padding,
-                width_override=width,
-            )
+        chips = self._build_chips(biometrics)
+        self._draw_chip_row(painter, chips, right_rect, align="right")
+
+    # ----------------------- top bar (portrait / narrow) ---------------------
 
     def _draw_top_bar_multiline(self, painter: QtGui.QPainter, rect: QtCore.QRect) -> None:
+        self._draw_panel(painter, rect, radius=16)
         session = self.state.session or {}
         posture = self.state.posture or {}
         biometrics = self.state.biometrics or {}
 
-        painter.save()
-        bg = QtGui.QColor(0, 0, 0)
-        bg.setAlpha(int(255 * HudStyle.BAR_OPACITY))
-        painter.setPen(QtCore.Qt.NoPen)
-        painter.setBrush(bg)
-        painter.drawRoundedRect(rect, 16, 16)
-        painter.restore()
+        line_font = QtGui.QFont(HudStyle.FONT_FAMILY, max(20, int(rect.height() * 0.38)))
+        painter.setFont(line_font)
+        metrics = painter.fontMetrics()
 
-        font_main = QtGui.QFont(HudStyle.FONT_FAMILY, max(20, int(rect.height() * 0.4)))
-        painter.setFont(font_main)
-        metrics_main = painter.fontMetrics()
-        status = (session.get('status') or 'idle').title()
-        duration = _fmt_duration(session.get('duration_sec'))
-        line1 = f"Sesion: {status} • {duration}"
-        exercise = posture.get('exercise') or session.get('exercise') or '--'
-        reps = posture.get('rep_count', 0)
-        phase = posture.get('phase_label') or posture.get('phase') or '--'
-        line2 = f"Ejercicio: {exercise} • Reps: {reps} • Fase: {phase}"
-
-        line_height = metrics_main.height()
-        y1 = rect.y() + max(8, (rect.height() - line_height * 3) // 4) + metrics_main.ascent()
+        lines = [
+            f"Sesion: {(session.get('status') or 'idle').title()} • {_fmt_duration(session.get('duration_sec'))}",
+            f"Ejercicio: {posture.get('exercise') or session.get('exercise') or '--'}",
+            f"Reps: {posture.get('rep_count', 0)} • Fase: {posture.get('phase_label') or posture.get('phase') or '--'}",
+        ]
+        y = rect.y() + 10 + metrics.ascent()
         painter.setPen(HudStyle.text_primary())
-        painter.drawText(QtCore.QRect(rect.x() + 12, rect.y(), rect.width() - 24, line_height), QtCore.Qt.AlignCenter, metrics_main.elidedText(line1, QtCore.Qt.ElideRight, rect.width() - 24))
-        painter.drawText(QtCore.QRect(rect.x() + 12, rect.y() + line_height, rect.width() - 24, line_height), QtCore.Qt.AlignCenter, metrics_main.elidedText(line2, QtCore.Qt.ElideRight, rect.width() - 24))
+        for line in lines:
+            painter.drawText(QtCore.QRect(rect.x() + 14, rect.y(), rect.width() - 28, rect.height()), QtCore.Qt.AlignLeft | QtCore.Qt.AlignTop, metrics.elidedText(line, QtCore.Qt.ElideRight, rect.width() - 28),)
+            y += metrics.height()
+            painter.translate(0, metrics.height())
 
-        font_chip = QtGui.QFont(HudStyle.FONT_FAMILY, max(13, int(rect.height() * 0.3)))
-        painter.setFont(font_chip)
-        metrics_chip = painter.fontMetrics()
-        chips = []
-        steps = biometrics.get('steps')
-        if steps is not None:
-            chips.append((f"Pasos: {steps}", None))
-        hr = biometrics.get('heart_rate_bpm')
-        if hr is not None:
-            chips.append((f"FC: {hr} bpm", None))
-        level = biometrics.get('fitbit_status_level', 'yellow')
-        icon = biometrics.get('fitbit_status_icon') or '●'
-        fitbit_color = HudStyle.fitbit_color(level)
-        fitbit_color.setAlpha(int(255 * HudStyle.CHIP_OPACITY))
-        chips.append((f"{icon} Fitbit {level}", fitbit_color))
+        painter.translate(0, -len(lines) * metrics.height())
+        painter.setFont(QtGui.QFont(HudStyle.FONT_FAMILY, max(13, int(rect.height() * 0.3))))
+        chips = self._build_chips(biometrics)
+        chips_area = QtCore.QRect(rect.x() + 14, rect.y() + rect.height() - max(26, int(rect.height() * 0.5)) - 10, rect.width() - 28, max(26, int(rect.height() * 0.5)))
+        self._draw_chip_rows(painter, chips, chips_area)
 
-        if not chips:
-            return
-        spacing = 12
-        chip_height = max(26, int(rect.height() * 0.5))
-        widths = [metrics_chip.horizontalAdvance(text) + 18 for text, _ in chips]
-        total_width = sum(widths) + spacing * (len(chips) - 1)
-        x_cursor = rect.x() + max(12, (rect.width() - total_width) // 2)
-        y_chip = rect.y() + rect.height() - chip_height - 12
-        for (text, color), width in zip(chips, widths):
-            painter.save()
-            painter.setPen(QtCore.Qt.NoPen)
-            bg_chip = color or QtGui.QColor(0, 0, 0, int(255 * HudStyle.CHIP_OPACITY))
-            painter.setBrush(bg_chip)
-            radius = chip_height // 2
-            chip_rect = QtCore.QRect(x_cursor, y_chip, width, chip_height)
-            painter.drawRoundedRect(chip_rect, radius, radius)
-            painter.setPen(HudStyle.text_primary())
-            painter.drawText(chip_rect, QtCore.Qt.AlignCenter, text)
-            painter.restore()
-            x_cursor += width + spacing
+    # ----------------------------- bottom bar --------------------------------
 
     def _draw_bottom_bar(self, painter: QtGui.QPainter, rect: QtCore.QRect) -> None:
-        painter.save()
-        bg = QtGui.QColor(0, 0, 0)
-        bg.setAlpha(int(255 * HudStyle.BAR_OPACITY))
-        painter.setPen(QtCore.Qt.NoPen)
-        painter.setBrush(bg)
-        painter.drawRoundedRect(rect, 14, 14)
-        painter.restore()
-
+        self._draw_panel(painter, rect, radius=14)
         session = self.state.session or {}
         active = session.get("duration_active_sec")
         left_text = f"Tiempo activo: {_fmt_duration(active)}"
 
-        font_main = QtGui.QFont(HudStyle.FONT_FAMILY, max(18, int(rect.height() * 0.42)))
-        painter.setFont(font_main)
-        metrics_main = painter.fontMetrics()
-        left_rect = QtCore.QRect(rect.x() + 18, rect.y(), rect.width() // 2, rect.height())
+        font = QtGui.QFont(HudStyle.FONT_FAMILY, max(18, int(rect.height() * 0.42)))
+        painter.setFont(font)
+        metrics = painter.fontMetrics()
         painter.setPen(HudStyle.text_primary())
         painter.drawText(
-            left_rect,
+            QtCore.QRect(rect.x() + 18, rect.y(), rect.width() // 2, rect.height()),
             QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter,
-            metrics_main.elidedText(left_text, QtCore.Qt.ElideRight, left_rect.width()),
+            metrics.elidedText(left_text, QtCore.Qt.ElideRight, rect.width() // 2),
         )
 
         if self._toast_message:
-            painter.setFont(QtGui.QFont(HudStyle.FONT_FAMILY, max(14, int(rect.height() * 0.32))))
             chip_height = max(26, int(rect.height() * 0.6))
-            chip_color = QtGui.QColor(0, 0, 0, int(255 * HudStyle.CHIP_OPACITY))
-            self._draw_chip(
-                painter,
-                self._toast_message,
-                rect.right() - 14,
-                rect,
-                chip_height,
-                HudStyle.text_primary(),
-                bg_color=chip_color,
-            )
+            chip_rect = QtCore.QRect(rect.right() - 18 - metrics.horizontalAdvance(self._toast_message) - 24, rect.y() + (rect.height() - chip_height) // 2, metrics.horizontalAdvance(self._toast_message) + 24, chip_height)
+            self._draw_chip_box(painter, chip_rect, self._toast_message, QtGui.QColor(0, 0, 0, int(255 * HudStyle.CHIP_OPACITY)))
         elif self.debug:
             self._draw_debug_metrics(painter, rect)
 
@@ -459,9 +354,7 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
             return
 
         painter.save()
-        font_chip = QtGui.QFont(HudStyle.FONT_FAMILY, max(12, int(rect.height() * 0.3)))
-        painter.setFont(font_chip)
-        chip_color = QtGui.QColor(0, 0, 0, int(255 * HudStyle.CHIP_OPACITY))
+        painter.setFont(QtGui.QFont(HudStyle.FONT_FAMILY, max(12, int(rect.height() * 0.3))))
         metrics = painter.fontMetrics()
         spacing = 8
         chip_height = max(24, int(rect.height() * 0.55))
@@ -475,11 +368,110 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
                 rect,
                 chip_height,
                 HudStyle.text_primary(),
-                bg_color=chip_color,
+                bg_color=QtGui.QColor(0, 0, 0, int(255 * HudStyle.CHIP_OPACITY)),
                 padding_x=8,
                 width_override=width,
             )
         painter.restore()
+
+    # -------------------------- chip helpers ---------------------------------
+
+    def _build_chips(self, biometrics: Dict[str, Any]) -> List[Tuple[str, Optional[QtGui.QColor]]]:
+        chips: List[Tuple[str, Optional[QtGui.QColor]]] = []
+        steps = biometrics.get("steps")
+        if steps is not None:
+            chips.append((f"Pasos: {steps}", None))
+        hr = biometrics.get("heart_rate_bpm")
+        if hr is not None:
+            chips.append((f"FC: {hr} bpm", None))
+        level = biometrics.get("fitbit_status_level", "yellow")
+        icon = biometrics.get("fitbit_status_icon") or "●"
+        color = HudStyle.fitbit_color(level)
+        color.setAlpha(int(255 * HudStyle.CHIP_OPACITY))
+        chips.append((f"{icon} Fitbit {level}", color))
+        return chips
+
+    def _draw_chip_rows(
+        self,
+        painter: QtGui.QPainter,
+        chips: List[Tuple[str, Optional[QtGui.QColor]]],
+        area: QtCore.QRect,
+        spacing: int = 8,
+    ) -> None:
+        if not chips:
+            return
+        metrics = painter.fontMetrics()
+        available = area.width()
+        chip_height = area.height()
+
+        rows: List[List[Tuple[str, Optional[QtGui.QColor], int]]] = [[]]
+        current_width = 0
+        for text, color in chips:
+            width = metrics.horizontalAdvance(text) + 20
+            if rows[-1] and current_width + width + spacing > available:
+                rows.append([])
+                current_width = 0
+            rows[-1].append((text, color, width))
+            current_width += width + spacing
+
+        y = area.y()
+        for row in rows:
+            if not row:
+                continue
+            row_width = sum(width for _, _, width in row) + spacing * (len(row) - 1)
+            x = area.x() + (available - row_width) // 2
+            for text, color, width in row:
+                chip_rect = QtCore.QRect(x, y, width, chip_height)
+                self._draw_chip_box(
+                    painter,
+                    chip_rect,
+                    text,
+                    color or QtGui.QColor(0, 0, 0, int(255 * HudStyle.CHIP_OPACITY)),
+                )
+                x += width + spacing
+            y += chip_height + 6
+
+    def _draw_chip_row(
+        self,
+        painter: QtGui.QPainter,
+        chips: List[Tuple[str, Optional[QtGui.QColor]]],
+        rect: QtCore.QRect,
+        *,
+        align: str = "right",
+        spacing: int = 10,
+    ) -> None:
+        if not chips:
+            return
+        metrics = painter.fontMetrics()
+        widths = [metrics.horizontalAdvance(text) + 20 for text, _ in chips]
+        total = sum(widths) + spacing * (len(chips) - 1)
+        if align == "right":
+            x_cursor = rect.right() - spacing
+        else:
+            x_cursor = rect.x() + (rect.width() - total) // 2
+        chip_height = max(26, int(rect.height() * 0.6))
+        for (text, color), width in zip(reversed(chips) if align == "right" else chips, reversed(widths) if align == "right" else widths):
+            if align == "right":
+                x_cursor = self._draw_chip(
+                    painter,
+                    text,
+                    x_cursor,
+                    rect,
+                    chip_height,
+                    HudStyle.text_primary(),
+                    bg_color=color or QtGui.QColor(0, 0, 0, int(255 * HudStyle.CHIP_OPACITY)),
+                    padding_x=10,
+                    width_override=width,
+                )
+            else:
+                chip_rect = QtCore.QRect(x_cursor, rect.y() + (rect.height() - chip_height) // 2, width, chip_height)
+                self._draw_chip_box(
+                    painter,
+                    chip_rect,
+                    text,
+                    color or QtGui.QColor(0, 0, 0, int(255 * HudStyle.CHIP_OPACITY)),
+                )
+                x_cursor += width + spacing
 
     def _draw_chip(
         self,
@@ -494,8 +486,6 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
         padding_x: int = 12,
         width_override: Optional[int] = None,
     ) -> int:
-        if not text:
-            return x_cursor
         painter.save()
         metrics = painter.fontMetrics()
         width = width_override or (metrics.horizontalAdvance(text) + padding_x * 2)
@@ -505,20 +495,29 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
             width,
             height,
         )
-        bg = bg_color or QtGui.QColor(0, 0, 0, int(255 * HudStyle.CHIP_OPACITY))
+        self._draw_chip_box(painter, rect, text, bg_color or QtGui.QColor(0, 0, 0, int(255 * HudStyle.CHIP_OPACITY)), text_color=text_color)
+        painter.restore()
+        return rect.x() - 10
+
+    def _draw_chip_box(
+        self,
+        painter: QtGui.QPainter,
+        rect: QtCore.QRect,
+        text: str,
+        bg_color: QtGui.QColor,
+        *,
+        text_color: Optional[QtGui.QColor] = None,
+    ) -> None:
+        painter.save()
         painter.setPen(QtCore.Qt.NoPen)
-        painter.setBrush(bg)
-        radius = height // 2
+        painter.setBrush(bg_color)
+        radius = rect.height() // 2
         painter.drawRoundedRect(rect, radius, radius)
-        painter.setPen(text_color)
+        painter.setPen(text_color or HudStyle.text_primary())
         painter.drawText(rect, QtCore.Qt.AlignCenter, text)
         painter.restore()
-        return rect.x() - 8
 
-    # ---------------------------- CLI fallback ---------------------------
-
-
-ASYNC_REFRESH = 0.2
+    # ---------------------------------------------------------------- CLI mode
 
 
 async def cli_loop(base_url: str) -> None:
@@ -535,7 +534,7 @@ async def cli_loop(base_url: str) -> None:
                 hr = biometrics.get("heart_rate_bpm", "--")
                 zone = biometrics.get("zone_label", "--")
                 steps = biometrics.get("steps", "--")
-                fitbit_status = biometrics.get("fitbit_status_icon", "â")
+                fitbit_status = biometrics.get("fitbit_status_icon", "●")
                 status = session.get("status", "--")
                 duration = _fmt_duration(session.get("duration_sec"))
                 active = _fmt_duration(session.get("duration_active_sec"))
@@ -554,10 +553,12 @@ async def cli_loop(base_url: str) -> None:
                 )
             except Exception as exc:
                 print(f"HUD error: {exc}")
-            await asyncio.sleep(ASYNC_REFRESH)
+            await asyncio.sleep(0.2)
 
 
 class MirrorApp:
+    """Wrapper to launch the overlay."""
+
     def run(self, base_url: str, *, debug: bool = False) -> None:  # pragma: no cover
         if QtWidgets is None:
             print("PyQt5 no esta instalado. Ejecuta en modo CLI con --cli.")
@@ -573,7 +574,7 @@ def main() -> None:
     parser.add_argument("--cli", action="store_true", help="Ejecutar en modo CLI")
     parser.add_argument("--overlay", action="store_true", help="Ejecutar overlay PyQt (por defecto)")
     parser.add_argument("--base-url", default="http://127.0.0.1:8000", help="URL base de la API")
-    parser.add_argument("--debug", action="store_true", help="Mostrar mÃ©tricas tÃ©cnicas en el HUD")
+    parser.add_argument("--debug", action="store_true", help="Mostrar métricas técnicas en el HUD")
     args = parser.parse_args()
 
     if args.cli:
