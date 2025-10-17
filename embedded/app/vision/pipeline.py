@@ -536,7 +536,7 @@ class PoseEstimator:
     def _draw_skeleton(self, frame: np.ndarray, joints: List[PoseJoint], quality: float) -> np.ndarray:
         if cv2 is None or not joints:
             return frame
-        height, width = frame.shape[0], frame.shape[1]
+        height, width = frame.shape[:2]
         joint_map = {j.name: j for j in joints}
         if quality >= 85:
             color = (0, 200, 0)
@@ -583,7 +583,7 @@ class PoseEstimator:
         rotate = int(getattr(self.settings, "hud_frame_rotate", 0))
         frame_to_encode = self._apply_rotation(frame_to_encode, rotate)
         h, w = frame_to_encode.shape[:2]
-        target_long_side = 1280
+        target_long_side = 960
         scale = target_long_side / float(max(h, w))
         if scale < 1.0:
             frame_to_encode = cv2.resize(
