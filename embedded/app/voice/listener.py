@@ -30,7 +30,7 @@ except Exception:  # pragma: no cover
 @dataclass
 class ListenerConfig:
     base_url: str = "http://127.0.0.1:8000"
-    device: int | str | None = None
+    device: Optional[int] = None
     rate: int = 16000
     blocksize: int = 8000
     silence_window: float = 1.0
@@ -66,23 +66,6 @@ class VoiceIntentListener:
         if requests is None:
             logger.warning("Requests no disponible; listener de voz deshabilitado")
             return
-        device_label = self.config.device
-        if device_label is not None:
-            try:
-                info = sd.query_devices(device_label)
-            except Exception as exc:
-                logger.error("Dispositivo de microfono '{}' no valido: {}", device_label, exc)
-                return
-            else:
-                max_inputs = info["max_input_channels"] if isinstance(info, dict) else getattr(info, "max_input_channels", 0)
-                if not max_inputs:
-                    logger.error(
-                        "El dispositivo '{}' no expone canales de entrada. "
-                        "Ejecuta 'python - <<\"PY\"; import sounddevice as sd, json; print(json.dumps(sd.query_devices(), indent=2)); PY' "
-                        "para elegir otro indice.",
-                        device_label,
-                    )
-                    return
         self._refresh_session_flag()
         self._stop_event.clear()
         self._thread = threading.Thread(target=self._run, name="VoiceIntentListener", daemon=True)

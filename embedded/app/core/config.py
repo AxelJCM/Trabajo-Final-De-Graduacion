@@ -40,11 +40,10 @@ class Settings(BaseModel):
     vosk_model_path: str | None = os.getenv("VOSK_MODEL_PATH")
     voice_intent_model_path: str | None = os.getenv("VOICE_INTENT_MODEL_PATH")
     voice_listener_enabled: bool = os.getenv("VOICE_LISTENER_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
-    _voice_device_raw = (os.getenv("VOICE_LISTENER_DEVICE") or "").strip()
-    voice_listener_device: int | str | None = (
-        int(_voice_device_raw)
-        if _voice_device_raw.isdigit()
-        else (_voice_device_raw or None)
+    voice_listener_device: int | None = (
+        int(os.getenv("VOICE_LISTENER_DEVICE"))
+        if (os.getenv("VOICE_LISTENER_DEVICE") or "").strip()
+        else None
     )
     voice_listener_rate: int = int(os.getenv("VOICE_LISTENER_RATE", "16000"))
     voice_listener_blocksize: int = int(os.getenv("VOICE_LISTENER_BLOCKSIZE", "8000"))
