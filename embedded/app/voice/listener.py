@@ -54,6 +54,7 @@ class VoiceIntentListener:
         self._cycle_index = 0
         self._session_started: bool = False
         self._last_prompt_ts: float = 0.0
+        self._primary_device: Optional[object] = None
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -91,6 +92,7 @@ class VoiceIntentListener:
                 sd.default.device = (self.config.device, None)  # type: ignore[attr-defined]
             except Exception:
                 sd.default.device = self.config.device  # type: ignore[attr-defined]
+        self._primary_device = primary_device
         self._refresh_session_flag()
         self._stop_event.clear()
         self._thread = threading.Thread(target=self._run, name="VoiceIntentListener", daemon=True)
@@ -167,7 +169,9 @@ class VoiceIntentListener:
         buffer_since_speech = 0.0
 
         stream = None
-        device_arg = primary_device
+        device_arg = self._primary_device
+        if device_arg is None:
+            device_arg = self.config.device
         try:
             stream = sd.RawInputStream(
                 samplerate=self.config.rate,
