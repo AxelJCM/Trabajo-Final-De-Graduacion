@@ -1,11 +1,11 @@
-"""Voice control recognizer with optional Vosk transcription and intent classifier."""
+"""Voice control recognizer with Vosk transcription and command mapping."""
 from __future__ import annotations
 
 import json
 import os
 import wave
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional
 import unicodedata
 
 from loguru import logger
@@ -17,11 +17,6 @@ try:  # Optional dependency
     import vosk  # type: ignore
 except Exception:  # pragma: no cover
     vosk = None  # type: ignore
-
-try:  # Optional dependency for classifier support
-    import joblib  # type: ignore
-except Exception:  # pragma: no cover
-    joblib = None  # type: ignore
 
 def _normalize_key(value: str) -> str:
     base = unicodedata.normalize("NFKD", value.strip().lower())
@@ -36,8 +31,6 @@ _DEFAULT_COMMANDS: Dict[str, str] = {
 }
 
 _COMMANDS_CACHE: Dict[str, str] = {}
-_CLASSIFIER_CACHE: Optional[Tuple[object, object]] = None
-
 
 def _load_commands() -> Dict[str, str]:
     global _COMMANDS_CACHE
@@ -61,42 +54,6 @@ def refresh_commands_cache() -> None:
 def add_voice_synonym(utterance: str, intent: str) -> None:
     register_voice_synonym(utterance, intent)
     refresh_commands_cache()
-
-
-def _load_classifier() -> Optional[Tuple[object, object]]:
-    """Return cached (vectorizer, model) tuple if available."""
-    global _CLASSIFIER_CACHE
-    if _CLASSIFIER_CACHE is not None:
-        return _CLASSIFIER_CACHE
-    settings = get_settings()
-    model_path = getattr(settings, "voice_intent_model_path", None) or os.getenv("VOICE_INTENT_MODEL_PATH")
-    if not model_path:
-        return None
-    if joblib is None:
-        logger.warning("joblib no disponible; no se puede cargar modelo de intent")
-        return None
-    path = Path(model_path).expanduser()
-    if not path.exists():
-        logger.warning("Modelo de intent de voz no encontrado: {}", path)
-        return None
-    try:
-        payload = joblib.load(path)
-        vectorizer = payload.get("vectorizer")
-        model = payload.get("model")
-        if vectorizer is None or model is None:
-            raise ValueError("El modelo no contiene vectorizer/model")
-        _CLASSIFIER_CACHE = (vectorizer, model)
-        logger.info("Modelo de intent de voz cargado desde {}", path)
-    except Exception as exc:  # pragma: no cover
-        logger.error("No se pudo cargar modelo de intent de voz: {}", exc)
-        _CLASSIFIER_CACHE = None
-    return _CLASSIFIER_CACHE
-
-
-def refresh_intent_model_cache() -> None:
-    global _CLASSIFIER_CACHE
-    _CLASSIFIER_CACHE = None
-    _load_classifier()
 
 
 class VoiceRecognizer:
@@ -160,20 +117,11 @@ class VoiceRecognizer:
 
 
 def map_utterance_to_intent(utterance: str) -> Optional[str]:
-    """Map a plaintext utterance to a known intent using synonyms or classifier."""
+    """Map a plaintext utterance to a known intent using synonym mapping."""
     if not utterance:
         return None
     mapping = _load_commands()
     normalized = _normalize_key(utterance)
     if normalized in mapping:
         return mapping[normalized]
-    classifier = _load_classifier()
-    if classifier and normalized:
-        vectorizer, model = classifier
-        try:
-            prediction = model.predict(vectorizer.transform([normalized]))[0]
-            logger.info("Intent predicho mediante modelo: '{}' -> '{}'", normalized, prediction)
-            return str(prediction)
-        except Exception as exc:  # pragma: no cover
-            logger.warning("El modelo de intent fallo: {}", exc)
     return None

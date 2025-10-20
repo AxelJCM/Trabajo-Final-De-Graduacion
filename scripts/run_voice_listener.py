@@ -33,7 +33,11 @@ INTENT_ACTIONS: Dict[str, Tuple[str, str, Optional[dict]]] = {
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Real-time voice listener")
-    parser.add_argument("--device", type=int, default=DEFAULT_DEVICE, help="Input device index (arecord -l)")
+    parser.add_argument(
+        "--device",
+        default=DEFAULT_DEVICE,
+        help="Input device (sounddevice index or name, e.g. 2 or 'hw:CARD=Camera,DEV=0')",
+    )
     parser.add_argument("--rate", type=int, default=DEFAULT_RATE, help="Sample rate")
     parser.add_argument("--blocksize", type=int, default=8000, help="Audio block size")
     parser.add_argument("--base-url", default="http://127.0.0.1:8000", help="Backend base URL")
@@ -63,6 +67,17 @@ def trigger_intent(intent: str, base_url: str) -> None:
 def main() -> None:
     args = parse_args()
     audio_queue: "queue.Queue[bytes]" = queue.Queue()
+    device_arg: int | str | None
+    if args.device in (None, ""):
+        device_arg = None
+    else:
+        device_str = str(args.device)
+        device_arg = int(device_str) if device_str.isdigit() else device_str
+        try:
+            sd.query_devices(device_arg)
+        except Exception as exc:
+            print(f"[VOICE] Invalid audio device '{device_str}': {exc}")
+            sys.exit(1)
 
     recognizer = VoiceRecognizer()
     vosk_model = recognizer._vosk_model
@@ -90,7 +105,7 @@ def main() -> None:
     with sd.RawInputStream(
         samplerate=args.rate,
         blocksize=args.blocksize,
-        device=args.device,
+        device=device_arg,
         dtype="int16",
         channels=channels,
         callback=audio_callback,

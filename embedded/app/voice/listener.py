@@ -30,7 +30,7 @@ except Exception:  # pragma: no cover
 @dataclass
 class ListenerConfig:
     base_url: str = "http://127.0.0.1:8000"
-    device: Optional[int] = None
+    device: int | str | None = None
     rate: int = 16000
     blocksize: int = 8000
     silence_window: float = 1.0
@@ -53,7 +53,6 @@ class VoiceIntentListener:
         self._cycle_index = 0
         self._session_started: bool = False
         self._last_prompt_ts: float = 0.0
-        self._primary_device: Optional[object] = None
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -67,30 +66,13 @@ class VoiceIntentListener:
         if requests is None:
             logger.warning("Requests no disponible; listener de voz deshabilitado")
             return
-        try:
-            hostapis = sd.query_hostapis() if sd is not None else []
-            alsa_idx = next(
-                (idx for idx, api in enumerate(hostapis) if "alsa" in (api.get("name") or "").lower()),
-                None,
-            )
-            if alsa_idx is not None:
-                sd.default.hostapi = alsa_idx  # type: ignore[attr-defined]
-        except Exception as exc:  # pragma: no cover
-            logger.debug("No se pudo fijar hostapi ALSA: {}", exc)
-        primary_device = self.config.device
-        if self.config.device is not None:
+        device_label = self.config.device
+        if device_label is not None:
             try:
-                sd.query_devices(self.config.device)
+                sd.query_devices(device_label)
             except Exception as exc:
-                logger.debug("No se pudo obtener info de dispositivo: {}", exc)
-            try:
-                sd.default.device = (self.config.device, None)  # type: ignore[attr-defined]
-            except Exception:
-                try:
-                    sd.default.device = self.config.device  # type: ignore[attr-defined]
-                except Exception as exc:
-                    logger.debug("No se pudo fijar dispositivo por defecto: {}", exc)
-        self._primary_device = primary_device
+                logger.error("Dispositivo de microfono '{}' no valido: {}", device_label, exc)
+                return
         self._refresh_session_flag()
         self._stop_event.clear()
         self._thread = threading.Thread(target=self._run, name="VoiceIntentListener", daemon=True)
@@ -167,9 +149,7 @@ class VoiceIntentListener:
         buffer_since_speech = 0.0
 
         stream = None
-        device_arg = self._primary_device
-        if device_arg is None:
-            device_arg = self.config.device
+        device_arg = self.config.device
         try:
             stream = sd.RawInputStream(
                 samplerate=self.config.rate,
@@ -181,25 +161,8 @@ class VoiceIntentListener:
             )
             stream.start()
         except Exception as exc:  # pragma: no cover
-            logger.warning("No se pudo abrir stream de audio (device={}): {}", device_arg, exc)
-            fallback = self._alsa_fallback_device()
-            if not fallback:
-                logger.error("No hay fallback ALSA disponible; escucha de voz deshabilitada")
-                return
-            try:
-                stream = sd.RawInputStream(
-                    samplerate=self.config.rate,
-                    blocksize=self.config.blocksize,
-                    device=fallback,
-                    dtype="int16",
-                    channels=1,
-                    callback=self._audio_callback,
-                )
-                stream.start()
-                logger.info("Stream de audio abierto con fallback {}", fallback)
-            except Exception as exc_fallback:  # pragma: no cover
-                logger.error("No se pudo abrir stream de audio con fallback {}: {}", fallback, exc_fallback)
-                return
+            logger.error("No se pudo abrir stream de audio (device={}): {}", device_arg, exc)
+            return
 
         try:
             while not self._stop_event.is_set():
@@ -288,19 +251,4 @@ class VoiceIntentListener:
             resp.raise_for_status()
         except Exception as exc:
             logger.debug("No se pudo notificar evento de voz: {}", exc)
-
-    def _alsa_fallback_device(self) -> Optional[str]:
-        if sd is None:
-            return None
-        device = self.config.device
-        if device is None:
-            return None
-        try:
-            sd.query_devices(device)
-        except Exception as exc:  # pragma: no cover
-            logger.debug("No se pudo obtener informacion del dispositivo ALSA: {}", exc)
-        return None
-
-
-
 
