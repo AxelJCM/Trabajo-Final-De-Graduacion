@@ -29,32 +29,18 @@ def _normalize_key(value: str) -> str:
 
 
 _DEFAULT_COMMANDS: Dict[str, str] = {
-    "start": "start",
     "iniciar": "start",
-    "inicia": "start",
     "iniciar sesion": "start",
     "inicia sesion": "start",
-    "comienza sesion": "start",
     "comenzar sesion": "start",
     "empezar sesion": "start",
-    "pause": "pause",
-    "pausa": "pause",
-    "next": "next",
     "siguiente": "next",
-    "stop": "stop",
+    "pausa": "pause",
+    "pausar": "pause",
     "detener": "stop",
     "detener sesion": "stop",
-    "detener la sesion": "stop",
     "terminar": "stop",
     "terminar sesion": "stop",
-    "volume_up": "volume_up",
-    "subir volumen": "volume_up",
-    "volume_down": "volume_down",
-    "bajar volumen": "volume_down",
-    "inicia rutina": "start_routine",
-    "iniciar rutina": "start_routine",
-    "comienza rutina": "start_routine",
-    "empezar rutina": "start_routine",
 }
 
 _COMMANDS_CACHE: Dict[str, str] = {}
@@ -189,8 +175,6 @@ def map_utterance_to_intent(utterance: str) -> Optional[str]:
     normalized = _normalize_key(utterance)
     if normalized in mapping:
         return mapping[normalized]
-    if "rutina" in normalized and ("inicia" in normalized or "iniciar" in normalized or "comienza" in normalized):
-        return "start_routine"
     classifier = _load_classifier()
     if classifier and normalized:
         vectorizer, model = classifier

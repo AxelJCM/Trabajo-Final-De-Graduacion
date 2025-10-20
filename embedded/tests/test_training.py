@@ -27,12 +27,12 @@ async def test_training_voice_sample(monkeypatch):
     async with AsyncClient(app=app, base_url="http://test") as ac:
         resp = await ac.post(
             "/training/voice/sample",
-            json={"transcript": "iniciar rutina de cardio", "intent": "start_routine", "add_synonym": True},
+            json={"transcript": "iniciar sesion", "intent": "start", "add_synonym": True},
         )
     assert resp.status_code == 200
     body = resp.json()
     assert body["success"] is True
-    assert body["data"]["intent"] == "start_routine"
+    assert body["data"]["intent"] == "start"
     assert paths
 
 

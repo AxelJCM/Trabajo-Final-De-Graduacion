@@ -25,10 +25,9 @@ DEFAULT_DEVICE = None
 
 INTENT_ACTIONS: Dict[str, Tuple[str, str, Optional[dict]]] = {
     "start": ("POST", "/session/start", {"exercise": "squat"}),
-    "start_routine": ("POST", "/session/start", {"exercise": "squat"}),
-    "pause": ("POST", "/session/stop", None),
-    "stop": ("POST", "/session/stop", None),
-    # "next": ("POST", "/session/next", None),  # add when endpoint exists
+    "pause": ("POST", "/session/pause", {}),
+    "stop": ("POST", "/session/stop", {}),
+    "next": ("POST", "/session/exercise", {"exercise": "pushup", "reset": True}),
 }
 
 

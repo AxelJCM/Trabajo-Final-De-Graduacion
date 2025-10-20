@@ -1,14 +1,6 @@
 {
-  "start": "start",
   "iniciar": "start",
-  "inicia": "start",
-  "inicia rutina": "start_routine",
-  "iniciar rutina": "start_routine",
-  "comienza rutina": "start_routine",
-  "pause": "pause",
-  "pausa": "pause",
-  "next": "next",
   "siguiente": "next",
-  "stop": "stop",
+  "pausa": "pause",
   "detener": "stop"
 }

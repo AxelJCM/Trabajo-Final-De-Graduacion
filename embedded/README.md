@@ -62,16 +62,16 @@ CRUNCH_DOWN_ANGLE / CRUNCH_UP_ANGLE
 
 ## Control por voz
 - Listener (`scripts/run_voice_listener.py`) usa Vosk + clasificadores entrenables (`app/voice/recognizer.py`).
-- Intents soportados: `start`, `start_routine`, `pause`, `stop`, `next`.
-  - `start/start_routine` → `/session/start` (ciclo comienza en sentadilla).
+- Intents soportados: `start`, `pause`, `stop`, `next`.
+  - `start` → `/session/start` con el ejercicio seleccionado (ciclo por defecto: sentadilla, pushup, crunch).
   - `pause` → `/session/pause`
   - `stop` → `/session/stop`
   - `next` → rota entre `squat`, `pushup`, `crunch` (`/session/exercise`).
 - `last_command` y hora de ejecución aparecen en el HUD al instante.
 
 ### Entrenamiento y registro de voz
-- Añadir sinónimo: `python scripts/add_voice_synonym.py "inicia cardio" start_routine`
-- Grabación etiquetada: `python scripts/record_and_register_voice.py "inicia rutina" start_routine`
+- Añadir sinónimo: `python scripts/add_voice_synonym.py "inicia sesion" start`
+- Grabación etiquetada: `python scripts/record_and_register_voice.py "detener sesion" stop`
 - Re-entrenar: `python scripts/train_voice_intent.py`
 - Listener standalone: `python scripts/run_voice_listener.py --base-url http://127.0.0.1:8000`
 

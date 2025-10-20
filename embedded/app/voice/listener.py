@@ -124,9 +124,7 @@ class VoiceIntentListener:
                 logger.warning("Error ejecutando intent '{}': {}", intent, exc)
                 return False
 
-        if intent in {"start", "start_routine"}:
-            if intent == "start_routine":
-                self._cycle_index = 0
+        if intent == "start":
             exercise = self._exercise_cycle[self._cycle_index]
             success = _post("/session/start", {"exercise": exercise, "reset": True})
             if success:
@@ -257,7 +255,7 @@ class VoiceIntentListener:
         self._last_prompt_ts = now
 
     def _ensure_session_started(self, intent: str) -> bool:
-        if intent in {"start", "start_routine"}:
+        if intent == "start":
             return True
         if self._session_started:
             return True

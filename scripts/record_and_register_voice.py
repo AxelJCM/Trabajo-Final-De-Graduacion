@@ -20,7 +20,7 @@ DEFAULT_DURATION = 3
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Grabar audio y registrarlo como sample de voz")
     parser.add_argument("transcript", help="Transcripcion de la frase")
-    parser.add_argument("intent", help="Intent (start, pause, start_routine, etc.)")
+    parser.add_argument("intent", help="Intent (start, pause, next, stop)")
     parser.add_argument("--device", default=DEFAULT_DEVICE, help="Dispositivo ALSA (default: %(default)s)")
     parser.add_argument("--rate", type=int, default=DEFAULT_RATE, help="Frecuencia de muestreo Hz (default: %(default)s)")
     parser.add_argument("--duration", type=int, default=DEFAULT_DURATION, help="Duracion en segundos (default: %(default)s)")
