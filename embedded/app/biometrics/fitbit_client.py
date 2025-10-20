@@ -46,7 +46,7 @@ class Metrics:
     intensity: float = 0.0
     fitbit_status: str = "unknown"
     fitbit_status_level: str = "yellow"
-    fitbit_status_icon: str = "🟡"
+    fitbit_status_icon: str = "[?]"
     fitbit_status_message: Optional[str] = None
     staleness_sec: float = 0.0
 
@@ -112,7 +112,7 @@ class FitbitClient:
             zone_color=row.zone_color,
             intensity=row.intensity or 0.0,
             fitbit_status=row.status or "cached",
-            fitbit_status_icon=row.status_icon or "yellow",
+            fitbit_status_icon=getattr(row, "status_icon", None) or "[?]",
             fitbit_status_message=row.status_message,
             error=None,
         )
@@ -257,7 +257,7 @@ class FitbitClient:
         }
 
     def _compute_status(self, metrics: Metrics, staleness: float) -> dict[str, str]:
-        icon_map = {"green": "🟢", "yellow": "🟡", "red": "🔴"}
+        icon_map = {"green": "[OK]", "yellow": "[!]", "red": "[X]"}
         interval = max(5, int(self.settings.fitbit_poll_interval or 15))
         if metrics.error:
             return {
@@ -282,7 +282,7 @@ class FitbitClient:
         return {
             "status": status,
             "level": level,
-            "icon": icon_map.get(level, "🟡"),
+            "icon": icon_map.get(level, "[?]"),
             "message": message,
         }
 
@@ -302,6 +302,7 @@ class FitbitClient:
                 intensity=float(metrics.intensity),
                 status=metrics.fitbit_status,
                 status_level=metrics.fitbit_status_level,
+                status_icon=metrics.fitbit_status_icon,
                 status_message=metrics.fitbit_status_message,
             )
         except Exception as exc:  # pragma: no cover - best effort persistence

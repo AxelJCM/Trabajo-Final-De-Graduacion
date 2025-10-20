@@ -154,9 +154,18 @@ def add_session_metrics(db: Session, **kwargs) -> SessionMetrics:
 def add_biometric_sample(db: Session, **kwargs) -> BiometricSample:
     row = BiometricSample(**kwargs)
     db.add(row)
-    db.commit()
-    db.refresh(row)
-    return row
+    try:
+        db.commit()
+        db.refresh(row)
+        return row
+    except OperationalError:
+        db.rollback()
+        _ensure_biometric_sample_columns(db)
+        row = BiometricSample(**kwargs)
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        return row
 
 
 def get_last_biometric_sample(db: Session) -> Optional[BiometricSample]:
@@ -204,6 +213,22 @@ def _ensure_session_metrics_columns(db: Session) -> None:
         ("duration_active_sec", "ALTER TABLE session_metrics ADD COLUMN duration_active_sec INTEGER DEFAULT 0"),
         ("total_reps", "ALTER TABLE session_metrics ADD COLUMN total_reps INTEGER DEFAULT 0"),
         ("exercise", "ALTER TABLE session_metrics ADD COLUMN exercise VARCHAR"),
+    ]
+    for name, ddl in migrations:
+        if name not in existing:
+            db.execute(text(ddl))
+    db.commit()
+
+
+def _ensure_biometric_sample_columns(db: Session) -> None:
+    try:
+        res = db.execute(text("PRAGMA table_info(biometric_sample)"))
+    except Exception:
+        return
+    existing = {row[1] for row in res}  # type: ignore[index]
+    migrations = [
+        ("status_icon", "ALTER TABLE biometric_sample ADD COLUMN status_icon VARCHAR"),
+        ("status_message", "ALTER TABLE biometric_sample ADD COLUMN status_message VARCHAR"),
     ]
     for name, ddl in migrations:
         if name not in existing:

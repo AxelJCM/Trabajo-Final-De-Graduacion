@@ -84,8 +84,13 @@ async def test_fitbit_client_uses_intraday_dataset(monkeypatch):
     assert metrics.error is None
     assert metrics.zone_name is not None
     assert metrics.fitbit_status_level in {"green", "yellow", "red"}
-    assert metrics.fitbit_status_icon in {"🟢", "🟡", "🔴"}
+    assert metrics.fitbit_status_icon in {"[OK]", "[!]", "[X]"}
     assert queue == []
+
+    cached_client = FitbitClient()
+    cached_metrics = cached_client.get_cached_metrics()
+    assert cached_metrics is not None
+    assert cached_metrics.fitbit_status_icon in {"[OK]", "[!]", "[X]", "[?]"}
 
 
 @pytest.mark.asyncio
@@ -134,5 +139,5 @@ async def test_fitbit_client_falls_back_to_summary(monkeypatch):
     assert metrics.timestamp_utc.tzinfo is not None
     assert metrics.zone_name is not None
     assert metrics.fitbit_status_level in {"green", "yellow", "red"}
-    assert metrics.fitbit_status_icon in {"🟢", "🟡", "🔴"}
+    assert metrics.fitbit_status_icon in {"[OK]", "[!]", "[X]"}
     assert queue == []

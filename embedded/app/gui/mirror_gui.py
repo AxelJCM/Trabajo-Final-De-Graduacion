@@ -299,7 +299,7 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
         hr_line = f"Frecuencia cardiaca: {hr} bpm" if hr is not None else "Frecuencia cardiaca: --"
         steps_line = f"Pasos: {steps}" if steps is not None else "Pasos: --"
         level = biometrics.get("fitbit_status_level", "yellow")
-        icon = biometrics.get("fitbit_status_icon") or "●"
+        icon = biometrics.get("fitbit_status_icon") or "[?]"
         chip_color = HudStyle.fitbit_chip(level)
         chip_color.setAlpha(int(255 * HudStyle.CHIP_OPACITY))
         chip = (f"{icon} Fitbit {level}", chip_color)

@@ -61,4 +61,5 @@ class BiometricSample(Base):
     intensity = Column(Float, default=0.0)
     status = Column(String, default="offline")
     status_level = Column(String, default="yellow")
+    status_icon = Column(String, nullable=True)
     status_message = Column(String, nullable=True)
