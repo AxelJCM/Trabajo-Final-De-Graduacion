@@ -67,6 +67,21 @@ class VoiceIntentListener:
         if requests is None:
             logger.warning("Requests no disponible; listener de voz deshabilitado")
             return
+        try:
+            hostapis = sd.query_hostapis() if sd is not None else []
+            alsa_idx = next(
+                (idx for idx, api in enumerate(hostapis) if "alsa" in (api.get("name") or "").lower()),
+                None,
+            )
+            if alsa_idx is not None:
+                sd.default.hostapi = alsa_idx  # type: ignore[attr-defined]
+        except Exception as exc:  # pragma: no cover
+            logger.debug("No se pudo fijar hostapi ALSA: {}", exc)
+        if self.config.device is not None:
+            try:
+                sd.default.device = (self.config.device, None)  # type: ignore[attr-defined]
+            except Exception:
+                sd.default.device = self.config.device  # type: ignore[attr-defined]
         self._refresh_session_flag()
         self._stop_event.clear()
         self._thread = threading.Thread(target=self._run, name="VoiceIntentListener", daemon=True)
