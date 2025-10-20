@@ -77,7 +77,16 @@ class VoiceIntentListener:
                 sd.default.hostapi = alsa_idx  # type: ignore[attr-defined]
         except Exception as exc:  # pragma: no cover
             logger.debug("No se pudo fijar hostapi ALSA: {}", exc)
+        primary_device = self.config.device
         if self.config.device is not None:
+            try:
+                info = sd.query_devices(self.config.device)
+                name = info.get("name") if isinstance(info, dict) else None
+                if name and "(hw:" in name:
+                    hw = name.split("(hw:")[-1].split(")")[0]
+                    primary_device = f"plughw:{hw}"
+            except Exception as exc:
+                logger.debug("No se pudo obtener info de dispositivo ALSA: {}", exc)
             try:
                 sd.default.device = (self.config.device, None)  # type: ignore[attr-defined]
             except Exception:
@@ -158,7 +167,7 @@ class VoiceIntentListener:
         buffer_since_speech = 0.0
 
         stream = None
-        device_arg = self.config.device
+        device_arg = primary_device
         try:
             stream = sd.RawInputStream(
                 samplerate=self.config.rate,
@@ -249,7 +258,7 @@ class VoiceIntentListener:
         now = time.time()
         if (now - self._last_prompt_ts) < 2.0:
             return
-        msg = "Debes decir 'iniciar sesion' o un sinonimo para comenzar."
+        msg = "Debes decir 'iniciar' para comenzar."
         print(f"[voice] {msg}")
         logger.info("Intent '{}' ignorado: {}", intent, msg)
         self._last_prompt_ts = now
