@@ -9,7 +9,6 @@ import sys
 import time
 from typing import Dict, Optional, Tuple
 
-import numpy as np
 import requests
 import sounddevice as sd
 
@@ -80,38 +79,10 @@ def main() -> None:
     last_intent: Optional[str] = None
     last_intent_ts: float = 0.0
     channels = 1
-    if args.device is not None:
-        try:
-            sd.check_input_settings(device=args.device, channels=channels, samplerate=args.rate)
-        except Exception:
-            try:
-                info = sd.query_devices(args.device)
-            except Exception as exc:
-                print(f"[VOICE] Could not query device channels: {exc}")
-                info = None
-            if isinstance(info, dict):
-                max_channels = int(info.get("max_input_channels") or 1)
-                if max_channels > 1:
-                    try:
-                        sd.check_input_settings(device=args.device, channels=max_channels, samplerate=args.rate)
-                        channels = max_channels
-                    except Exception as exc:
-                        print(f"[VOICE] Device {args.device} does not support {max_channels} channels @ {args.rate}Hz: {exc}")
-            else:
-                print("[VOICE] Using single channel input (device info unavailable)")
-    input_channels = channels
 
     def audio_callback(indata, frames, time_info, status):  # pragma: no cover
         if status:
             print(f"[VOICE] Audio status: {status}")
-        if input_channels > 1:
-            try:
-                data = np.frombuffer(indata, dtype=np.int16)
-                data = data.reshape(-1, input_channels).mean(axis=1).astype(np.int16)
-                audio_queue.put(data.tobytes())
-                return
-            except Exception as exc:
-                print(f"[VOICE] Failed to downmix audio: {exc}")
         audio_queue.put(bytes(indata))
 
     print("[VOICE] Listening... (Ctrl+C to exit)")
