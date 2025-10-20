@@ -62,10 +62,10 @@ class HudStyle:
     TIMER_INTERVAL_MS = 80  # ~12.5 Hz
     FONT_FAMILY = "Roboto"
 
-    TOP_FONT = 18
-    SUB_FONT = 16
-    CHIP_FONT = 15
-    BOTTOM_FONT = 17
+    TOP_FONT = 22
+    SUB_FONT = 20
+    CHIP_FONT = 19
+    BOTTOM_FONT = 21
 
     @staticmethod
     def text_primary(alpha: int = 235) -> QtGui.QColor:
