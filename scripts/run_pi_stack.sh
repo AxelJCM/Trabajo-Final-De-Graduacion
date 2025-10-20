@@ -71,7 +71,23 @@ wait_for_api() {
 wait_for_api || exit 1
 
 # Voice listener (best effort; falls back gracefully if deps missing)
-start_process voice python "${ROOT_DIR}/scripts/run_voice_listener.py" --base-url "${BASE_URL}"
+LISTENER_ARGS=("${ROOT_DIR}/scripts/run_voice_listener.py" "--base-url" "${BASE_URL}")
+if [ -n "${VOICE_LISTENER_DEVICE:-}" ]; then
+  LISTENER_ARGS+=("--device" "${VOICE_LISTENER_DEVICE}")
+fi
+if [ -n "${VOICE_LISTENER_RATE:-}" ]; then
+  LISTENER_ARGS+=("--rate" "${VOICE_LISTENER_RATE}")
+fi
+if [ -n "${VOICE_LISTENER_BLOCKSIZE:-}" ]; then
+  LISTENER_ARGS+=("--blocksize" "${VOICE_LISTENER_BLOCKSIZE}")
+fi
+if [ -n "${VOICE_LISTENER_SILENCE_WINDOW:-}" ]; then
+  LISTENER_ARGS+=("--silence-window" "${VOICE_LISTENER_SILENCE_WINDOW}")
+fi
+if [ -n "${VOICE_LISTENER_DEDUPE_SECONDS:-}" ]; then
+  LISTENER_ARGS+=("--dedupe-seconds" "${VOICE_LISTENER_DEDUPE_SECONDS}")
+fi
+start_process voice python "${LISTENER_ARGS[@]}"
 
 if [ "${HUD_MODE}" == "overlay" ]; then
   start_process hud python -m app.gui.mirror_gui --overlay --base-url "${BASE_URL}"
