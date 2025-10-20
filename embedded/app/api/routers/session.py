@@ -33,6 +33,20 @@ def _mark_command(name: str) -> None:
     _state["last_command_ts"] = ts
 
 
+def _register_voice_event(message: str, intent: Optional[str] = None) -> dict[str, Any]:
+    now = _now()
+    seq = int(_state.get("voice_event_seq") or 0) + 1
+    payload = {
+        "message": message,
+        "intent": intent,
+        "timestamp": now.isoformat(),
+        "seq": seq,
+    }
+    _state["voice_event"] = payload
+    _state["voice_event_seq"] = seq
+    return payload
+
+
 def _accumulate_active(now: Optional[datetime] = None) -> None:
     now = now or _now()
     active_started = _state.get("active_started_at")
@@ -59,6 +73,10 @@ _state: dict[str, Any] = {
     "exercise": pose_estimator.exercise,
     "last_command": None,
     "last_command_ts": None,
+    "requires_start": True,
+    "last_summary": None,
+    "voice_event": None,
+    "voice_event_seq": 0,
 }
 
 
@@ -73,6 +91,8 @@ def session_start(payload: Optional[dict] = None) -> Envelope:
         now = _now()
         _state["status"] = "active"
         _state["active_started_at"] = now
+        _state["requires_start"] = False
+        _state["last_summary"] = None
         _mark_command("resume")
         logger.info("Session resumed")
         return Envelope(
@@ -100,6 +120,8 @@ def session_start(payload: Optional[dict] = None) -> Envelope:
             "active_started_at": now,
             "accum_active": 0.0,
             "exercise": pose_estimator.exercise,
+            "requires_start": False,
+            "last_summary": None,
         }
     )
     _mark_command("start")
@@ -178,6 +200,13 @@ def session_stop(request: Request, db: Session = Depends(get_db)) -> Envelope:
     except Exception as exc:  # pragma: no cover - persistence fallback
         logger.warning("Failed to persist session metrics: {}", exc)
 
+    summary = {
+        "duration_sec": duration_total,
+        "duration_active_sec": duration_active,
+        "total_reps": total_reps,
+        "rep_breakdown": rep_breakdown,
+    }
+
     pose_estimator.reset_session(exercise=_state.get("exercise"), preserve_totals=False)
     _state.update(
         {
@@ -185,6 +214,8 @@ def session_stop(request: Request, db: Session = Depends(get_db)) -> Envelope:
             "status": "idle",
             "active_started_at": None,
             "accum_active": 0.0,
+            "requires_start": True,
+            "last_summary": summary,
         }
     )
     _mark_command("stop")
@@ -243,8 +274,22 @@ def session_status() -> Envelope:
             "last_command_ts": (
                 _state["last_command_ts"].isoformat() if isinstance(_state.get("last_command_ts"), datetime) else None
             ),
+            "requires_voice_start": bool(_state.get("requires_start")),
+            "session_summary": _state.get("last_summary"),
+            "voice_event": _state.get("voice_event"),
         },
     )
+
+
+@router.post("/session/voice-event", response_model=Envelope)
+def session_voice_event(payload: Optional[dict] = None) -> Envelope:
+    data = payload or {}
+    message = data.get("message")
+    if not message:
+        return Envelope(success=False, error="missing_message")
+    intent = data.get("intent")
+    event = _register_voice_event(str(message), intent=str(intent) if intent is not None else None)
+    return Envelope(success=True, data=event)
 
 
 @router.get("/session/last", response_model=Envelope)
@@ -267,3 +312,5 @@ def session_history(
         for row in rows
     ]
     return Envelope(success=True, data={"sessions": items, "count": len(items)})
+
+

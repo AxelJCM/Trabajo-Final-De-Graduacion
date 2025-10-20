@@ -6,6 +6,7 @@ import os
 import wave
 from pathlib import Path
 from typing import Dict, Optional, Tuple
+import unicodedata
 
 from loguru import logger
 
@@ -22,16 +23,30 @@ try:  # Optional dependency for classifier support
 except Exception:  # pragma: no cover
     joblib = None  # type: ignore
 
+def _normalize_key(value: str) -> str:
+    base = unicodedata.normalize("NFKD", value.strip().lower())
+    return "".join(ch for ch in base if not unicodedata.combining(ch))
+
+
 _DEFAULT_COMMANDS: Dict[str, str] = {
     "start": "start",
     "iniciar": "start",
     "inicia": "start",
+    "iniciar sesion": "start",
+    "inicia sesion": "start",
+    "comienza sesion": "start",
+    "comenzar sesion": "start",
+    "empezar sesion": "start",
     "pause": "pause",
     "pausa": "pause",
     "next": "next",
     "siguiente": "next",
     "stop": "stop",
     "detener": "stop",
+    "detener sesion": "stop",
+    "detener la sesion": "stop",
+    "terminar": "stop",
+    "terminar sesion": "stop",
     "volume_up": "volume_up",
     "subir volumen": "volume_up",
     "volume_down": "volume_down",
@@ -39,6 +54,7 @@ _DEFAULT_COMMANDS: Dict[str, str] = {
     "inicia rutina": "start_routine",
     "iniciar rutina": "start_routine",
     "comienza rutina": "start_routine",
+    "empezar rutina": "start_routine",
 }
 
 _COMMANDS_CACHE: Dict[str, str] = {}
@@ -49,7 +65,11 @@ def _load_commands() -> Dict[str, str]:
     global _COMMANDS_CACHE
     if not _COMMANDS_CACHE:
         data = load_voice_commands()
-        mapping = {**_DEFAULT_COMMANDS, **{k.lower(): v for k, v in data.items()}}
+        mapping: Dict[str, str] = {}
+        for key, value in _DEFAULT_COMMANDS.items():
+            mapping[_normalize_key(key)] = value
+        for key, value in data.items():
+            mapping[_normalize_key(key)] = value
         _COMMANDS_CACHE = mapping
     return _COMMANDS_CACHE
 
@@ -166,7 +186,7 @@ def map_utterance_to_intent(utterance: str) -> Optional[str]:
     if not utterance:
         return None
     mapping = _load_commands()
-    normalized = utterance.strip().lower()
+    normalized = _normalize_key(utterance)
     if normalized in mapping:
         return mapping[normalized]
     if "rutina" in normalized and ("inicia" in normalized or "iniciar" in normalized or "comienza" in normalized):

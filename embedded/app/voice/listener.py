@@ -52,6 +52,8 @@ class VoiceIntentListener:
         self._last_intent_ts: float = 0.0
         self._exercise_cycle = ["squat", "pushup", "crunch"]
         self._cycle_index = 0
+        self._session_started: bool = False
+        self._last_prompt_ts: float = 0.0
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -65,6 +67,7 @@ class VoiceIntentListener:
         if requests is None:
             logger.warning("Requests no disponible; listener de voz deshabilitado")
             return
+        self._refresh_session_flag()
         self._stop_event.clear()
         self._thread = threading.Thread(target=self._run, name="VoiceIntentListener", daemon=True)
         self._thread.start()
@@ -78,35 +81,53 @@ class VoiceIntentListener:
 
     # --- internal helpers ---
 
-    def _trigger_intent(self, intent: str) -> None:
+    def _trigger_intent(self, intent: str, *, raw_text: Optional[str] = None) -> None:
+        if raw_text:
+            print(f'[voice] "{raw_text}" -> {intent}')
+            logger.info("Intent '{}' reconocido (texto='{}')", intent, raw_text)
+        else:
+            print(f"[voice] -> {intent}")
+            logger.info("Intent '{}' reconocido", intent)
+        display_text = raw_text or intent
+        if display_text:
+            message = f'Voz: "{display_text}" -> {intent}'
+            self._post_voice_event(message, intent=intent)
         if requests is None:
+            return
+        if not self._ensure_session_started(intent):
             return
         base = self.config.base_url.rstrip("/")
 
-        def _post(path: str, payload: Optional[dict]) -> None:
+        def _post(path: str, payload: Optional[dict]) -> bool:
             url = base + path
             try:
                 resp = requests.post(url, json=payload, timeout=5)
                 resp.raise_for_status()
                 logger.info("Intent '{}' ejecutado -> {}", intent, url)
+                return True
             except Exception as exc:  # pragma: no cover
                 logger.warning("Error ejecutando intent '{}': {}", intent, exc)
+                return False
 
         if intent in {"start", "start_routine"}:
             if intent == "start_routine":
                 self._cycle_index = 0
             exercise = self._exercise_cycle[self._cycle_index]
-            _post("/session/start", {"exercise": exercise, "reset": True})
+            success = _post("/session/start", {"exercise": exercise, "reset": True})
+            if success:
+                self._session_started = True
         elif intent == "pause":
             _post("/session/pause", {})
         elif intent == "stop":
-            _post("/session/stop", {})
+            if _post("/session/stop", {}):
+                self._session_started = False
         elif intent == "next":
             self._cycle_index = (self._cycle_index + 1) % len(self._exercise_cycle)
             exercise = self._exercise_cycle[self._cycle_index]
             _post("/session/exercise", {"exercise": exercise, "reset": True})
         else:
             logger.info("Intent '{}' detectado (sin accion configurada)", intent)
+        self._refresh_session_flag()
 
     def _audio_callback(self, indata, frames, time_info, status) -> None:  # pragma: no cover - callback
         if status:
@@ -155,7 +176,7 @@ class VoiceIntentListener:
                             if self._last_intent == intent and (now - self._last_intent_ts) < self.config.dedupe_seconds:
                                 logger.debug("Intent '{}' ignorado (duplicado)", intent)
                             else:
-                                self._trigger_intent(intent)
+                                self._trigger_intent(intent, raw_text=text)
                                 self._last_intent = intent
                                 self._last_intent_ts = now
                         else:
@@ -174,3 +195,58 @@ class VoiceIntentListener:
                     stream.close()
             except Exception:
                 pass
+
+    # --- session helpers ------------------------------------------------
+
+    def _refresh_session_flag(self) -> bool:
+        if requests is None:
+            return self._session_started
+        base = self.config.base_url.rstrip("/")
+        try:
+            resp = requests.get(f"{base}/session/status", timeout=3)
+            if resp.ok:
+                payload = resp.json() or {}
+                data = payload.get("data") or {}
+                status = str(data.get("status") or "").lower()
+                started_at = data.get("started_at")
+                self._session_started = bool(started_at and status in {"active", "paused"})
+        except Exception as exc:
+            logger.debug("No se pudo consultar estado de sesion: {}", exc)
+        return self._session_started
+
+    def _announce_need_start(self, intent: str) -> None:
+        now = time.time()
+        if (now - self._last_prompt_ts) < 2.0:
+            return
+        msg = "Debes decir 'iniciar sesion' o un sinonimo para comenzar."
+        print(f"[voice] {msg}")
+        logger.info("Intent '{}' ignorado: {}", intent, msg)
+        self._last_prompt_ts = now
+
+    def _ensure_session_started(self, intent: str) -> bool:
+        if intent in {"start", "start_routine"}:
+            return True
+        if self._session_started:
+            return True
+        if self._refresh_session_flag():
+            return True
+        self._announce_need_start(intent)
+        return False
+
+    def _post_voice_event(self, message: str, *, intent: Optional[str] = None) -> None:
+        if requests is None:
+            return
+        base = self.config.base_url.rstrip("/")
+        try:
+            resp = requests.post(
+                f"{base}/session/voice-event",
+                json={"message": message, "intent": intent},
+                timeout=3,
+            )
+            resp.raise_for_status()
+        except Exception as exc:
+            logger.debug("No se pudo notificar evento de voz: {}", exc)
+
+
+
+

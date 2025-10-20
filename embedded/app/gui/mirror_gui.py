@@ -108,6 +108,8 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
         self._last_feedback_code: Optional[str] = None
         self._latest_metrics: Dict[str, Any] = {}
         self._current_feedback: str = "--"
+        self._session_summary: Optional[Dict[str, Any]] = None
+        self._last_voice_seq: int = 0
 
         self.setWindowTitle("TFG Smart Mirror HUD")
         self.setCursor(QtCore.Qt.BlankCursor)
@@ -155,6 +157,9 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
         self._draw_top_panel(painter, top_rect, portrait=portrait)
         self._draw_bottom_panel(painter, bottom_rect)
 
+        if self._session_summary:
+            self._draw_session_summary(painter)
+
         if self._toast_message:
             self._draw_toast(painter, bottom_rect)
 
@@ -180,7 +185,30 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
         try:
             resp = self._client.get(f"{self.base_url}/session/status", timeout=1.2)
             if resp.ok:
-                self.state.session = resp.json().get("data", {})
+                session_data = resp.json().get("data", {}) or {}
+                self.state.session = session_data
+                session_requires_start = bool(session_data.get("requires_voice_start"))
+                summary = session_data.get("session_summary")
+                if summary:
+                    self._session_summary = summary
+                elif session_data.get("status") in {"active", "paused"}:
+                    self._session_summary = None
+                if session_requires_start and not self._toast_message and not self._session_summary:
+                    self._toast_message = "Di \"Iniciar sesion\" para comenzar"
+                    self._toast_until = time.time() + HudStyle.TOAST_DURATION
+                    self._last_feedback_code = "voice_requires_start"
+                voice_event = session_data.get("voice_event") or {}
+                try:
+                    seq = int(voice_event.get("seq", 0) or 0)
+                except Exception:
+                    seq = 0
+                if seq and seq > self._last_voice_seq:
+                    message = voice_event.get("message")
+                    if message:
+                        self._toast_message = str(message)
+                        self._toast_until = time.time() + HudStyle.TOAST_DURATION
+                        self._last_feedback_code = "voice_event"
+                    self._last_voice_seq = seq
         except Exception as exc:  # pragma: no cover
             self.last_error = f"session: {exc}"
         try:
@@ -263,7 +291,6 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
         exercise = posture.get("exercise") or session.get("exercise") or "--"
         reps = posture.get("rep_count", 0)
         phase = posture.get("phase_label") or posture.get("phase") or "--"
-        feedback = self._current_feedback or "--"
 
         font_title = QtGui.QFont(HudStyle.FONT_FAMILY, HudStyle.TOP_FONT)
         font_body = QtGui.QFont(HudStyle.FONT_FAMILY, HudStyle.SUB_FONT)
@@ -283,7 +310,6 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
         lines = [
             f"Ejercicio: {exercise}",
             f"Reps: {reps} • Fase: {phase}",
-            f"Feedback: {feedback}",
         ]
         for line in lines:
             line_rect = QtCore.QRect(rect.x() + 16, y_cursor, rect.width() - 32, metrics.height())
@@ -362,6 +388,49 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
         font = QtGui.QFont(HudStyle.FONT_FAMILY, 12)
         painter.setFont(font)
         self._draw_chip_row(painter, items, QtCore.QRect(rect.x(), rect.y(), rect.width(), rect.height()), align_right=True, padding_x=8)
+        painter.restore()
+
+    def _draw_session_summary(self, painter: QtGui.QPainter) -> None:
+        summary = self._session_summary or {}
+        lines: List[str] = ["Resumen de la sesion"]
+        duration = summary.get("duration_sec")
+        if isinstance(duration, int):
+            lines.append(f"Duracion: {_fmt_duration(duration)}")
+        active = summary.get("duration_active_sec")
+        if isinstance(active, int):
+            lines.append(f"Activo: {_fmt_duration(active)}")
+        total_reps = summary.get("total_reps")
+        lines.append(f"Reps totales: {total_reps if isinstance(total_reps, int) else 0}")
+        rep_breakdown = summary.get("rep_breakdown") or {}
+        for exercise, count in sorted(rep_breakdown.items()):
+            label = exercise.replace("_", " ").title()
+            lines.append(f"{label}: {count}")
+        painter.save()
+        font = QtGui.QFont(HudStyle.FONT_FAMILY, HudStyle.SUB_FONT + 1)
+        painter.setFont(font)
+        metrics = painter.fontMetrics()
+        if not lines:
+            painter.restore()
+            return
+        width = max(metrics.horizontalAdvance(line) for line in lines) + 48
+        line_height = metrics.height() + 6
+        height = line_height * len(lines) + 24
+        rect = QtCore.QRect(
+            (self.width() - width) // 2,
+            (self.height() - height) // 2,
+            width,
+            height,
+        )
+        bg = QtGui.QColor(0, 0, 0)
+        bg.setAlpha(int(255 * 0.72))
+        painter.setPen(QtCore.Qt.NoPen)
+        painter.setBrush(bg)
+        painter.drawRoundedRect(rect, 18, 18)
+        painter.setPen(HudStyle.text_primary())
+        y = rect.y() + 18
+        for line in lines:
+            painter.drawText(QtCore.QRect(rect.x() + 20, y, rect.width() - 40, metrics.height()), QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter, line)
+            y += line_height
         painter.restore()
 
     def _draw_toast(self, painter: QtGui.QPainter, bottom_rect: QtCore.QRect) -> None:
@@ -537,3 +606,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
