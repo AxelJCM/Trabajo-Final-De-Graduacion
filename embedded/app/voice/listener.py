@@ -81,17 +81,16 @@ class VoiceIntentListener:
         primary_device = self.config.device
         if self.config.device is not None:
             try:
-                info = sd.query_devices(self.config.device)
-                name = info.get("name") if isinstance(info, dict) else None
-                if name and "(hw:" in name:
-                    hw = name.split("(hw:")[-1].split(")")[0]
-                    primary_device = f"plughw:{hw}"
+                sd.query_devices(self.config.device)
             except Exception as exc:
-                logger.debug("No se pudo obtener info de dispositivo ALSA: {}", exc)
+                logger.debug("No se pudo obtener info de dispositivo: {}", exc)
             try:
                 sd.default.device = (self.config.device, None)  # type: ignore[attr-defined]
             except Exception:
-                sd.default.device = self.config.device  # type: ignore[attr-defined]
+                try:
+                    sd.default.device = self.config.device  # type: ignore[attr-defined]
+                except Exception as exc:
+                    logger.debug("No se pudo fijar dispositivo por defecto: {}", exc)
         self._primary_device = primary_device
         self._refresh_session_flag()
         self._stop_event.clear()
@@ -302,16 +301,7 @@ class VoiceIntentListener:
         except Exception as exc:  # pragma: no cover
             logger.debug("No se pudo obtener informacion del dispositivo ALSA: {}", exc)
             return None
-        name = None
-        if isinstance(info, dict):
-            name = info.get("name")
-        if name:
-            marker = "(hw:"
-            if marker in name:
-                hw = name.split(marker)[-1].split(")")[0]
-                if hw:
-                    return f"plughw:{hw}"
-        return None
+        return device
 
 
 
