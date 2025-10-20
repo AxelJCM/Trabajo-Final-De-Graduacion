@@ -160,19 +160,37 @@ class VoiceIntentListener:
         buffer_since_speech = 0.0
 
         stream = None
+        device_arg = self.config.device
         try:
             stream = sd.RawInputStream(
                 samplerate=self.config.rate,
                 blocksize=self.config.blocksize,
-                device=self.config.device,
+                device=device_arg,
                 dtype="int16",
                 channels=1,
                 callback=self._audio_callback,
             )
             stream.start()
         except Exception as exc:  # pragma: no cover
-            logger.error("No se pudo abrir stream de audio: {}", exc)
-            return
+            logger.warning("No se pudo abrir stream de audio (device={}): {}", device_arg, exc)
+            fallback = self._alsa_fallback_device()
+            if not fallback:
+                logger.error("No hay fallback ALSA disponible; escucha de voz deshabilitada")
+                return
+            try:
+                stream = sd.RawInputStream(
+                    samplerate=self.config.rate,
+                    blocksize=self.config.blocksize,
+                    device=fallback,
+                    dtype="int16",
+                    channels=1,
+                    callback=self._audio_callback,
+                )
+                stream.start()
+                logger.info("Stream de audio abierto con fallback {}", fallback)
+            except Exception as exc_fallback:  # pragma: no cover
+                logger.error("No se pudo abrir stream de audio con fallback {}: {}", fallback, exc_fallback)
+                return
 
         try:
             while not self._stop_event.is_set():
@@ -261,6 +279,28 @@ class VoiceIntentListener:
             resp.raise_for_status()
         except Exception as exc:
             logger.debug("No se pudo notificar evento de voz: {}", exc)
+
+    def _alsa_fallback_device(self) -> Optional[str]:
+        if sd is None:
+            return None
+        device = self.config.device
+        if device is None:
+            return None
+        try:
+            info = sd.query_devices(device)
+        except Exception as exc:  # pragma: no cover
+            logger.debug("No se pudo obtener informacion del dispositivo ALSA: {}", exc)
+            return None
+        name = None
+        if isinstance(info, dict):
+            name = info.get("name")
+        if name:
+            marker = "(hw:"
+            if marker in name:
+                hw = name.split(marker)[-1].split(")")[0]
+                if hw:
+                    return f"plughw:{hw}"
+        return None
 
 
 
