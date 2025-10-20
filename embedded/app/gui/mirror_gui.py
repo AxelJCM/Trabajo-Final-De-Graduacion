@@ -109,6 +109,7 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
         self._latest_metrics: Dict[str, Any] = {}
         self._current_feedback: str = "--"
         self._session_summary: Optional[Dict[str, Any]] = None
+        self._requires_start: bool = True
         self._last_voice_seq: int = 0
 
         self.setWindowTitle("TFG Smart Mirror HUD")
@@ -188,15 +189,19 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
                 session_data = resp.json().get("data", {}) or {}
                 self.state.session = session_data
                 session_requires_start = bool(session_data.get("requires_voice_start"))
+                self._requires_start = session_requires_start
                 summary = session_data.get("session_summary")
                 if summary:
                     self._session_summary = summary
                 elif session_data.get("status") in {"active", "paused"}:
                     self._session_summary = None
-                if session_requires_start and not self._toast_message and not self._session_summary:
+                if session_requires_start and self._last_feedback_code != "voice_event":
                     self._toast_message = "Di \"Iniciar sesion\" para comenzar"
                     self._toast_until = time.time() + HudStyle.TOAST_DURATION
                     self._last_feedback_code = "voice_requires_start"
+                elif not session_requires_start and self._last_feedback_code == "voice_requires_start":
+                    self._toast_message = None
+                    self._last_feedback_code = None
                 voice_event = session_data.get("voice_event") or {}
                 try:
                     seq = int(voice_event.get("seq", 0) or 0)
@@ -255,6 +260,10 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
         code = posture.get("feedback_code") or ""
         if feedback:
             self._current_feedback = feedback
+        if self._requires_start and self._last_feedback_code == "voice_requires_start":
+            return
+        if self._last_feedback_code == "voice_event" and time.time() < self._toast_until:
+            return
         if not feedback:
             return
         if code in {"exercise_changed", "idle", "good", "excellent"}:

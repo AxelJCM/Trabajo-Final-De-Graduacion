@@ -93,6 +93,7 @@ def session_start(payload: Optional[dict] = None) -> Envelope:
         _state["active_started_at"] = now
         _state["requires_start"] = False
         _state["last_summary"] = None
+        pose_estimator.set_counting_enabled(True)
         _mark_command("resume")
         logger.info("Session resumed")
         return Envelope(
@@ -124,6 +125,7 @@ def session_start(payload: Optional[dict] = None) -> Envelope:
             "last_summary": None,
         }
     )
+    pose_estimator.set_counting_enabled(True)
     _mark_command("start")
     logger.info("Session started exercise={} reset_totals={}", pose_estimator.exercise, reset_totals)
     return Envelope(
@@ -145,6 +147,7 @@ def session_pause() -> Envelope:
     now = _now()
     _accumulate_active(now)
     _state["status"] = "paused"
+    pose_estimator.set_counting_enabled(False)
     _mark_command("pause")
     logger.info("Session paused")
     return Envelope(
@@ -208,6 +211,7 @@ def session_stop(request: Request, db: Session = Depends(get_db)) -> Envelope:
     }
 
     pose_estimator.reset_session(exercise=_state.get("exercise"), preserve_totals=False)
+    pose_estimator.set_counting_enabled(False)
     _state.update(
         {
             "started_at": None,
@@ -312,5 +316,6 @@ def session_history(
         for row in rows
     ]
     return Envelope(success=True, data={"sessions": items, "count": len(items)})
+
 
 

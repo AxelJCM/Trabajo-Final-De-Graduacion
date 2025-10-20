@@ -87,6 +87,7 @@ class PoseEstimator:
         self.rep_totals: Dict[str, int] = {"squat": 0, "pushup": 0, "crunch": 0}
         self.feedback: str = "Listo para empezar"
         self.feedback_code: str = "idle"
+        self.counting_enabled: bool = False
         self._latencies: deque[float] = deque(maxlen=max(5, self.settings.pose_latency_window))
         self._quality_window: deque[float] = deque(maxlen=max(5, self.settings.pose_quality_window))
         self._quality_sum: float = 0.0
@@ -204,17 +205,23 @@ class PoseEstimator:
         self._fps_window.clear()
         self._last_frame_ts = None
         self._mock_progress = 0.0
+        self.counting_enabled = False
 
     def set_exercise(self, exercise: str, *, reset: bool = False) -> None:
         exercise_name = exercise.lower()
         if reset:
+            was_enabled = self.counting_enabled
             self.reset_session(exercise=exercise_name, preserve_totals=False)
+            self.counting_enabled = was_enabled
             return
         self.exercise = exercise_name
         self.phase = "up"
         self.rep_totals.setdefault(self.exercise, 0)
         self.feedback = "Ejercicio actualizado"
         self.feedback_code = "exercise_changed"
+
+    def set_counting_enabled(self, enabled: bool) -> None:
+        self.counting_enabled = bool(enabled)
 
     def get_phase_label(self) -> str:
         return self._SPANISH_PHASE.get(self.phase, self.phase.title())
@@ -402,8 +409,9 @@ class PoseEstimator:
             self.phase = "down"
         elif self.phase == "down" and angle_value >= up:
             self.phase = "up"
-            self.rep_count += 1
-            self.rep_totals[self.exercise] = self.rep_totals.get(self.exercise, 0) + 1
+            if self.counting_enabled:
+                self.rep_count += 1
+                self.rep_totals[self.exercise] = self.rep_totals.get(self.exercise, 0) + 1
 
     def _feedback_for_angles(self, angles: PoseAngles, quality: float) -> Tuple[str, str]:
         angle_value = self._primary_angle(angles)
