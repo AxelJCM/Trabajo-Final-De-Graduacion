@@ -8,6 +8,7 @@ import time
 from dataclasses import dataclass
 from typing import Optional
 
+import numpy as np
 from loguru import logger
 
 from app.voice.recognizer import VoiceRecognizer, map_utterance_to_intent
@@ -55,6 +56,7 @@ class VoiceIntentListener:
         self._session_started: bool = False
         self._last_prompt_ts: float = 0.0
         self._primary_device: Optional[object] = None
+        self._input_channels: int = 1
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -155,6 +157,14 @@ class VoiceIntentListener:
     def _audio_callback(self, indata, frames, time_info, status) -> None:  # pragma: no cover - callback
         if status:
             logger.debug("Audio status: {}", status)
+        if self._input_channels > 1:
+            try:
+                data = np.frombuffer(indata, dtype=np.int16)
+                data = data.reshape(-1, self._input_channels).mean(axis=1).astype(np.int16)
+                self._audio_queue.put(data.tobytes())
+                return
+            except Exception as exc:
+                logger.debug("Fallo al convertir audio multicanal: {}", exc)
         self._audio_queue.put(bytes(indata))
 
     def _run(self) -> None:
@@ -172,14 +182,16 @@ class VoiceIntentListener:
         if device_arg is None:
             device_arg = self.config.device
         try:
+            channels = self._select_input_channels(device_arg)
             stream = sd.RawInputStream(
                 samplerate=self.config.rate,
                 blocksize=self.config.blocksize,
                 device=device_arg,
                 dtype="int16",
-                channels=1,
+                channels=channels,
                 callback=self._audio_callback,
             )
+            self._input_channels = channels
             stream.start()
         except Exception as exc:  # pragma: no cover
             logger.warning("No se pudo abrir stream de audio (device={}): {}", device_arg, exc)
@@ -188,14 +200,16 @@ class VoiceIntentListener:
                 logger.error("No hay fallback ALSA disponible; escucha de voz deshabilitada")
                 return
             try:
+                channels = self._select_input_channels(fallback)
                 stream = sd.RawInputStream(
                     samplerate=self.config.rate,
                     blocksize=self.config.blocksize,
                     device=fallback,
                     dtype="int16",
-                    channels=1,
+                    channels=channels,
                     callback=self._audio_callback,
                 )
+                self._input_channels = channels
                 stream.start()
                 logger.info("Stream de audio abierto con fallback {}", fallback)
             except Exception as exc_fallback:  # pragma: no cover
@@ -289,6 +303,33 @@ class VoiceIntentListener:
             resp.raise_for_status()
         except Exception as exc:
             logger.debug("No se pudo notificar evento de voz: {}", exc)
+
+    def _select_input_channels(self, device: Optional[object]) -> int:
+        if sd is None or device is None:
+            return 1
+        try:
+            sd.check_input_settings(device=device, channels=1, samplerate=self.config.rate)
+            return 1
+        except Exception:
+            pass
+        info = None
+        try:
+            info = sd.query_devices(device)
+        except Exception as exc:
+            logger.debug("No se pudo obtener info de canales para {}: {}", device, exc)
+            return 1
+        if isinstance(info, dict):
+            max_channels = int(info.get("max_input_channels") or 1)
+        else:
+            max_channels = 1
+        if max_channels <= 1:
+            return 1
+        try:
+            sd.check_input_settings(device=device, channels=max_channels, samplerate=self.config.rate)
+            return max_channels
+        except Exception as exc:
+            logger.debug("El dispositivo {} no soporta {} canales: {}", device, max_channels, exc)
+            return 1
 
     def _alsa_fallback_device(self) -> Optional[str]:
         if sd is None:
