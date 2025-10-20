@@ -62,10 +62,10 @@ class HudStyle:
     TIMER_INTERVAL_MS = 80  # ~12.5 Hz
     FONT_FAMILY = "Roboto"
 
-    TOP_FONT = 16
-    SUB_FONT = 14
-    CHIP_FONT = 13
-    BOTTOM_FONT = 15
+    TOP_FONT = 18
+    SUB_FONT = 16
+    CHIP_FONT = 15
+    BOTTOM_FONT = 17
 
     @staticmethod
     def text_primary(alpha: int = 235) -> QtGui.QColor:
@@ -196,7 +196,7 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
                 elif session_data.get("status") in {"active", "paused"}:
                     self._session_summary = None
                 if session_requires_start and self._last_feedback_code != "voice_event":
-                    self._toast_message = "Di \"Iniciar\" para comenzar"
+                    self._toast_message = "Di \"Iniciar\" para comenzar la sesion"
                     self._toast_until = time.time() + HudStyle.TOAST_DURATION
                     self._last_feedback_code = "voice_requires_start"
                 elif not session_requires_start and self._last_feedback_code == "voice_requires_start":
@@ -250,6 +250,8 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
         try:
             data = QtCore.QByteArray.fromBase64(frame_b64.encode("utf-8"))
             image = QtGui.QImage.fromData(data, "JPG")
+            if not image.isNull():
+                image = image.mirrored(True, False)
             self.frame_pixmap = None if image.isNull() else QtGui.QPixmap.fromImage(image)
         except Exception as exc:  # pragma: no cover
             self.frame_pixmap = None
@@ -615,4 +617,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
