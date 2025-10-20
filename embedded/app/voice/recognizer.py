@@ -30,17 +30,9 @@ def _normalize_key(value: str) -> str:
 
 _DEFAULT_COMMANDS: Dict[str, str] = {
     "iniciar": "start",
-    "iniciar sesion": "start",
-    "inicia sesion": "start",
-    "comenzar sesion": "start",
-    "empezar sesion": "start",
     "siguiente": "next",
     "pausa": "pause",
-    "pausar": "pause",
     "detener": "stop",
-    "detener sesion": "stop",
-    "terminar": "stop",
-    "terminar sesion": "stop",
 }
 
 _COMMANDS_CACHE: Dict[str, str] = {}

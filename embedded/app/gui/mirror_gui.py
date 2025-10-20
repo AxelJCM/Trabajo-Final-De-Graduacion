@@ -196,7 +196,7 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
                 elif session_data.get("status") in {"active", "paused"}:
                     self._session_summary = None
                 if session_requires_start and self._last_feedback_code != "voice_event":
-                    self._toast_message = "Di \"Iniciar sesion\" para comenzar"
+                    self._toast_message = "Di \"Iniciar\" para comenzar"
                     self._toast_until = time.time() + HudStyle.TOAST_DURATION
                     self._last_feedback_code = "voice_requires_start"
                 elif not session_requires_start and self._last_feedback_code == "voice_requires_start":

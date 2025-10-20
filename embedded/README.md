@@ -70,8 +70,8 @@ CRUNCH_DOWN_ANGLE / CRUNCH_UP_ANGLE
 - `last_command` y hora de ejecución aparecen en el HUD al instante.
 
 ### Entrenamiento y registro de voz
-- Añadir sinónimo: `python scripts/add_voice_synonym.py "inicia sesion" start`
-- Grabación etiquetada: `python scripts/record_and_register_voice.py "detener sesion" stop`
+- Añadir sinónimo: `python scripts/add_voice_synonym.py "iniciar" start`
+- Grabación etiquetada: `python scripts/record_and_register_voice.py "detener" stop`
 - Re-entrenar: `python scripts/train_voice_intent.py`
 - Listener standalone: `python scripts/run_voice_listener.py --base-url http://127.0.0.1:8000`
 
