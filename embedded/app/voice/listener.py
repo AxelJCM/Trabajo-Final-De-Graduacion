@@ -143,18 +143,33 @@ class VoiceIntentListener:
 
         stream = None
         device_arg = self.config.device
-        try:
-            stream = sd.RawInputStream(
-                samplerate=self.config.rate,
-                blocksize=self.config.blocksize,
-                device=device_arg,
-                dtype="int16",
-                channels=1,
-                callback=self._audio_callback,
-            )
-            stream.start()
-        except Exception as exc:  # pragma: no cover
-            logger.error("No se pudo abrir stream de audio (device={}): {}", device_arg, exc)
+        candidates: list[object] = []
+        if device_arg is not None:
+            candidates.append(device_arg)
+            if isinstance(device_arg, int):
+                candidates.extend([f"hw:{device_arg},0", f"plughw:{device_arg},0"])
+        else:
+            candidates.append(None)
+        last_exc: Exception | None = None
+        for candidate in candidates:
+            try:
+                stream = sd.RawInputStream(
+                    samplerate=self.config.rate,
+                    blocksize=self.config.blocksize,
+                    device=candidate,
+                    dtype="int16",
+                    channels=1,
+                    callback=self._audio_callback,
+                )
+                stream.start()
+                device_arg = candidate
+                break
+            except Exception as exc:  # pragma: no cover
+                last_exc = exc
+                logger.warning("No se pudo abrir stream de audio (device={}): {}", candidate, exc)
+                stream = None
+        if stream is None:
+            logger.error("No se pudo inicializar ningun stream de audio; listener detenido")
             return
 
         try:

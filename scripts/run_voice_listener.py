@@ -89,14 +89,36 @@ def main() -> None:
 
     print("[VOICE] Listening... (Ctrl+C to exit)")
 
-    with sd.RawInputStream(
-        samplerate=args.rate,
-        blocksize=args.blocksize,
-        device=args.device,
-        dtype="int16",
-        channels=channels,
-        callback=audio_callback,
-    ):
+    candidates = []
+    if args.device is not None:
+        candidates.append(args.device)
+        candidates.extend([f"hw:{args.device},0", f"plughw:{args.device},0"])
+    else:
+        candidates.append(None)
+
+    stream = None
+    last_exc: Exception | None = None
+    for candidate in candidates:
+        try:
+            stream = sd.RawInputStream(
+                samplerate=args.rate,
+                blocksize=args.blocksize,
+                device=candidate,
+                dtype="int16",
+                channels=channels,
+                callback=audio_callback,
+            )
+            stream.start()
+            args.device = candidate  # type: ignore[assignment]
+            break
+        except Exception as exc:
+            last_exc = exc
+            print(f"[VOICE] Failed to open device '{candidate}': {exc}")
+            stream = None
+    if stream is None:
+        raise SystemExit(f"[VOICE] Could not open audio input: {last_exc}")
+
+    try:
         buffer_since_speech = 0.0
         block_seconds = args.blocksize / args.rate
         while True:
@@ -124,6 +146,10 @@ def main() -> None:
                 if buffer_since_speech >= args.silence_window:
                     rec.Reset()
                     buffer_since_speech = 0.0
+    finally:
+        if stream is not None:
+            stream.stop()
+            stream.close()
 
 
 if __name__ == "__main__":
