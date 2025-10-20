@@ -74,10 +74,18 @@ def main() -> None:
         device_str = str(args.device)
         device_arg = int(device_str) if device_str.isdigit() else device_str
         try:
-            sd.query_devices(device_arg)
+            info = sd.query_devices(device_arg)
         except Exception as exc:
             print(f"[VOICE] Invalid audio device '{device_str}': {exc}")
             sys.exit(1)
+        else:
+            max_inputs = info["max_input_channels"] if isinstance(info, dict) else getattr(info, "max_input_channels", 0)
+            if not max_inputs:
+                print(
+                    f"[VOICE] Device '{device_str}' reports 0 input channels. "
+                    "Choose another device (run 'python - <<\"PY\"; import sounddevice as sd, json; print(json.dumps(sd.query_devices(), indent=2)); PY')."
+                )
+                sys.exit(1)
 
     recognizer = VoiceRecognizer()
     vosk_model = recognizer._vosk_model

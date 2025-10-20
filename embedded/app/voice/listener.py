@@ -69,10 +69,20 @@ class VoiceIntentListener:
         device_label = self.config.device
         if device_label is not None:
             try:
-                sd.query_devices(device_label)
+                info = sd.query_devices(device_label)
             except Exception as exc:
                 logger.error("Dispositivo de microfono '{}' no valido: {}", device_label, exc)
                 return
+            else:
+                max_inputs = info["max_input_channels"] if isinstance(info, dict) else getattr(info, "max_input_channels", 0)
+                if not max_inputs:
+                    logger.error(
+                        "El dispositivo '{}' no expone canales de entrada. "
+                        "Ejecuta 'python - <<\"PY\"; import sounddevice as sd, json; print(json.dumps(sd.query_devices(), indent=2)); PY' "
+                        "para elegir otro indice.",
+                        device_label,
+                    )
+                    return
         self._refresh_session_flag()
         self._stop_event.clear()
         self._thread = threading.Thread(target=self._run, name="VoiceIntentListener", daemon=True)
@@ -251,4 +261,3 @@ class VoiceIntentListener:
             resp.raise_for_status()
         except Exception as exc:
             logger.debug("No se pudo notificar evento de voz: {}", exc)
-
