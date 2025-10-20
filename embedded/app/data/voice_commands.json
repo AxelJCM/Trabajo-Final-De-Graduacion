@@ -10,9 +10,5 @@
   "next": "next",
   "siguiente": "next",
   "stop": "stop",
-  "detener": "stop",
-  "volume_up": "volume_up",
-  "subir volumen": "volume_up",
-  "volume_down": "volume_down",
-  "bajar volumen": "volume_down"
+  "detener": "stop"
 }
