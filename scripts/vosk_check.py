@@ -58,21 +58,109 @@ def main() -> None:
         audio_q.put(bytes(indata))
 
     print(">>> Probando Vosk, habla cerca del micro. Ctrl+C para salir. (device=%s, rate=%s)" % (args.device, args.rate))
-    with sd.RawInputStream(
-        samplerate=args.rate,
-        blocksize=8000,
-        channels=1,
-        dtype="int16",
-        device=args.device,
-        callback=callback,
-    ):
+    # Validate device and pick alternative if needed
+    try:
+        dinfo = sd.query_devices(args.device)
+        name = dinfo.get("name")
+        if int(dinfo.get("max_input_channels") or 0) < 1:
+            print(f"[CHECK] Device {args.device} ('{name}') sin canales de entrada, buscando alternativo...")
+            for idx, _ in enumerate(sd.query_devices()):
+                try:
+                    d2 = sd.query_devices(idx)
+                    if int(d2.get("max_input_channels") or 0) > 0:
+                        args.device = idx
+                        name = d2.get("name")
+                        print(f"[CHECK] Usando dispositivo alternativo index={idx} name='{name}'")
+                        break
+                except Exception:
+                    continue
+        else:
+            print(f"[CHECK] Device seleccionado: index={args.device} name='{name}'")
+    except Exception as exc:
+        print(f"[CHECK] No se pudo consultar dispositivos: {exc}")
+
+    channels = 1
+    stream = None
+    try:
+        stream = sd.RawInputStream(
+            samplerate=args.rate,
+            blocksize=8000,
+            channels=channels,
+            dtype="int16",
+            device=args.device,
+            callback=callback,
+        )
+        stream.start()
+    except Exception as exc1:
+        # Fallback to default samplerate
         try:
-            while True:
-                data = audio_q.get()
-                if recognizer.AcceptWaveform(data):
-                    result = json.loads(recognizer.Result())
-                    print(json.dumps(result, ensure_ascii=False))
-        except KeyboardInterrupt:
+            d = sd.query_devices(args.device)
+            def_sr = int(float(d.get("default_samplerate") or args.rate))
+        except Exception:
+            def_sr = args.rate
+        if def_sr != args.rate:
+            try:
+                print(f"[CHECK] Reintentando con sample_rate={def_sr}")
+                stream = sd.RawInputStream(
+                    samplerate=def_sr,
+                    blocksize=8000,
+                    channels=channels,
+                    dtype="int16",
+                    device=args.device,
+                    callback=callback,
+                )
+                stream.start()
+                recognizer = vosk.KaldiRecognizer(model, def_sr)
+            except Exception as exc2:
+                # Try channels=2
+                try:
+                    print(f"[CHECK] Reintentando con channels=2 y sample_rate={def_sr}")
+                    stream = sd.RawInputStream(
+                        samplerate=def_sr,
+                        blocksize=8000,
+                        channels=2,
+                        dtype="int16",
+                        device=args.device,
+                        callback=callback,
+                    )
+                    stream.start()
+                    channels = 2
+                    recognizer = vosk.KaldiRecognizer(model, def_sr)
+                except Exception as exc3:
+                    raise SystemExit(
+                        f"[CHECK] No se pudo abrir audio: {exc1} | fallback_sr={def_sr} -> {exc2} | fallback_channels=2 -> {exc3}"
+                    )
+        else:
+            # Try channels=2 with original rate
+            try:
+                print(f"[CHECK] Reintentando con channels=2")
+                stream = sd.RawInputStream(
+                    samplerate=args.rate,
+                    blocksize=8000,
+                    channels=2,
+                    dtype="int16",
+                    device=args.device,
+                    callback=callback,
+                )
+                stream.start()
+                channels = 2
+            except Exception as exc2:
+                raise SystemExit(f"[CHECK] No se pudo abrir audio: {exc1} | channels=2 -> {exc2}")
+
+    try:
+        while True:
+            data = audio_q.get()
+            if recognizer.AcceptWaveform(data):
+                result = json.loads(recognizer.Result())
+                print(json.dumps(result, ensure_ascii=False))
+    except KeyboardInterrupt:
+        pass
+    finally:
+        try:
+            if stream:
+                stream.stop()
+                stream.close()
+        except Exception:
             pass
 
 

@@ -76,6 +76,35 @@ class VoiceIntentListener:
         except Exception:
             logger.error("VOICE_LISTENER_DEVICE debe ser un indice entero valido (ej. 2)")
             return
+        # Validate selected device and auto-pick a working input device if needed
+        try:
+            info = sd.query_devices(self._device_index)
+            name = info.get("name")
+            max_in = int(info.get("max_input_channels") or 0)
+            def_sr = float(info.get("default_samplerate") or self.config.rate)
+            if max_in < 1:
+                logger.warning(
+                    "Dispositivo {} ('{}') no tiene canales de entrada (max_input_channels={}); buscando alternativo",
+                    self._device_index, name, max_in,
+                )
+                # Auto-pick first device with input channels
+                for idx, dev in enumerate(sd.query_devices()):
+                    try:
+                        dinfo = sd.query_devices(idx)
+                        if int(dinfo.get("max_input_channels") or 0) > 0:
+                            self._device_index = idx
+                            name = dinfo.get("name")
+                            def_sr = float(dinfo.get("default_samplerate") or self.config.rate)
+                            logger.info("Usando dispositivo de entrada alternativo index={} name='{}'", idx, name)
+                            break
+                    except Exception:
+                        continue
+            logger.info(
+                "Audio device seleccionado: index={} name='{}' max_input_channels={} default_sr={}",
+                self._device_index, name, max_in, def_sr,
+            )
+        except Exception as exc:
+            logger.warning("No se pudo consultar dispositivos de audio: {}", exc)
         self._audio_queue = queue.Queue()
         self._refresh_session_flag()
         self._stop_event.clear()
@@ -154,19 +183,85 @@ class VoiceIntentListener:
 
         self._audio_queue = queue.Queue()
         stream = None
+        # Try opening stream; on failure due to sample rate, fallback to device default
+        sr_in_use = self.config.rate
+        channels = 1
         try:
             stream = sd.RawInputStream(
-                samplerate=self.config.rate,
+                samplerate=sr_in_use,
                 blocksize=self.config.blocksize,
                 device=self._device_index,
                 dtype="int16",
-                channels=1,
+                channels=channels,
                 callback=self._audio_callback,
             )
             stream.start()
-        except Exception as exc:  # pragma: no cover
-            logger.error("No se pudo abrir stream de audio (device={}): {}", self._device_index, exc)
-            return
+        except Exception as exc1:  # pragma: no cover
+            # Attempt fallback to device default sample rate
+            try:
+                dinfo = sd.query_devices(self._device_index)
+                def_sr = int(float(dinfo.get("default_samplerate") or sr_in_use))
+            except Exception:
+                def_sr = sr_in_use
+            if def_sr != sr_in_use:
+                try:
+                    logger.info("Reintentando stream con sample_rate={} (device={})", def_sr, self._device_index)
+                    stream = sd.RawInputStream(
+                        samplerate=def_sr,
+                        blocksize=self.config.blocksize,
+                        device=self._device_index,
+                        dtype="int16",
+                        channels=channels,
+                        callback=self._audio_callback,
+                    )
+                    stream.start()
+                    sr_in_use = def_sr
+                    try:
+                        vosk_recognizer = vosk.KaldiRecognizer(self._vosk_model, sr_in_use)
+                    except Exception:
+                        pass
+                except Exception as exc2:  # pragma: no cover
+                    # Try channels=2 as a last resort
+                    try:
+                        logger.info("Reintentando con channels=2 y sample_rate={} (device={})", def_sr, self._device_index)
+                        stream = sd.RawInputStream(
+                            samplerate=def_sr,
+                            blocksize=self.config.blocksize,
+                            device=self._device_index,
+                            dtype="int16",
+                            channels=2,
+                            callback=self._audio_callback,
+                        )
+                        stream.start()
+                        channels = 2
+                        sr_in_use = def_sr
+                        try:
+                            vosk_recognizer = vosk.KaldiRecognizer(self._vosk_model, sr_in_use)
+                        except Exception:
+                            pass
+                    except Exception as exc3:
+                        logger.error(
+                            "No se pudo abrir stream (device={}): {} | fallback_sr={} -> {} | fallback_channels=2 -> {}",
+                            self._device_index, exc1, def_sr, exc2, exc3,
+                        )
+                        return
+            else:
+                # Try channels=2 with original sample rate
+                try:
+                    logger.info("Reintentando con channels=2 (device={})", self._device_index)
+                    stream = sd.RawInputStream(
+                        samplerate=sr_in_use,
+                        blocksize=self.config.blocksize,
+                        device=self._device_index,
+                        dtype="int16",
+                        channels=2,
+                        callback=self._audio_callback,
+                    )
+                    stream.start()
+                    channels = 2
+                except Exception as exc2:
+                    logger.error("No se pudo abrir stream de audio (device={}): {} | channels=2 -> {}", self._device_index, exc1, exc2)
+                    return
 
         try:
             while not self._stop_event.is_set():

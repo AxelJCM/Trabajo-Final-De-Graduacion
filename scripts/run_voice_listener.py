@@ -98,6 +98,29 @@ def main() -> None:
         args.device = DEFAULT_DEVICE
         print(f"[VOICE] Usando device por defecto: {args.device}")
 
+    # Validate selected device and auto-pick a working input device if needed
+    try:
+        dinfo = sd.query_devices(args.device)
+        name = dinfo.get("name")
+        max_in = int(dinfo.get("max_input_channels") or 0)
+        if max_in < 1:
+            print(f"[VOICE] Device {args.device} ('{name}') tiene max_input_channels={max_in}. Buscando alternativo...")
+            for idx, dev in enumerate(sd.query_devices()):
+                try:
+                    d2 = sd.query_devices(idx)
+                    if int(d2.get("max_input_channels") or 0) > 0:
+                        args.device = idx
+                        name = d2.get("name")
+                        print(f"[VOICE] Usando dispositivo de entrada alternativo index={idx} name='{name}'")
+                        break
+                except Exception:
+                    continue
+        print(f"[VOICE] Device seleccionado: index={args.device} name='{name}'")
+    except Exception as exc:
+        print(f"[VOICE] No se pudo consultar dispositivos de audio: {exc}")
+
+    # Try opening stream; fallback to device default samplerate when needed
+    stream = None
     try:
         stream = sd.RawInputStream(
             samplerate=args.rate,
@@ -108,8 +131,62 @@ def main() -> None:
             callback=audio_callback,
         )
         stream.start()
-    except Exception as exc:
-        raise SystemExit(f"[VOICE] Could not open audio input (device={args.device}): {exc}") from exc
+    except Exception as exc1:
+        try:
+            d = sd.query_devices(args.device)
+            def_sr = int(float(d.get("default_samplerate") or args.rate))
+        except Exception:
+            def_sr = args.rate
+        if def_sr != args.rate:
+            try:
+                print(f"[VOICE] Reintentando con sample_rate={def_sr} (device={args.device})")
+                stream = sd.RawInputStream(
+                    samplerate=def_sr,
+                    blocksize=args.blocksize,
+                    device=args.device,
+                    dtype="int16",
+                    channels=channels,
+                    callback=audio_callback,
+                )
+                stream.start()
+                rec = vosk.KaldiRecognizer(vosk_model, def_sr)
+            except Exception as exc2:
+                # Try channels=2
+                try:
+                    print(f"[VOICE] Reintentando con channels=2 y sample_rate={def_sr} (device={args.device})")
+                    stream = sd.RawInputStream(
+                        samplerate=def_sr,
+                        blocksize=args.blocksize,
+                        device=args.device,
+                        dtype="int16",
+                        channels=2,
+                        callback=audio_callback,
+                    )
+                    stream.start()
+                    channels = 2
+                    rec = vosk.KaldiRecognizer(vosk_model, def_sr)
+                except Exception as exc3:
+                    raise SystemExit(
+                        f"[VOICE] Could not open audio input (device={args.device}): {exc1} | fallback_sr={def_sr} -> {exc2} | fallback_channels=2 -> {exc3}"
+                    ) from exc3
+        else:
+            # Try channels=2 with original sample rate
+            try:
+                print(f"[VOICE] Reintentando con channels=2 (device={args.device})")
+                stream = sd.RawInputStream(
+                    samplerate=args.rate,
+                    blocksize=args.blocksize,
+                    device=args.device,
+                    dtype="int16",
+                    channels=2,
+                    callback=audio_callback,
+                )
+                stream.start()
+                channels = 2
+            except Exception as exc2:
+                raise SystemExit(
+                    f"[VOICE] Could not open audio input (device={args.device}): {exc1} | channels=2 -> {exc2}"
+                ) from exc2
 
     try:
         buffer_since_speech = 0.0
