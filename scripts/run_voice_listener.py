@@ -98,26 +98,15 @@ def main() -> None:
         args.device = DEFAULT_DEVICE
         print(f"[VOICE] Usando device por defecto: {args.device}")
 
-    # Validate selected device and auto-pick a working input device if needed
+    # Log selected device info; do not auto-switch
     try:
         dinfo = sd.query_devices(args.device)
         name = dinfo.get("name")
-        max_in = int(dinfo.get("max_input_channels") or 0)
-        if max_in < 1:
-            print(f"[VOICE] Device {args.device} ('{name}') tiene max_input_channels={max_in}. Buscando alternativo...")
-            for idx, dev in enumerate(sd.query_devices()):
-                try:
-                    d2 = sd.query_devices(idx)
-                    if int(d2.get("max_input_channels") or 0) > 0:
-                        args.device = idx
-                        name = d2.get("name")
-                        print(f"[VOICE] Usando dispositivo de entrada alternativo index={idx} name='{name}'")
-                        break
-                except Exception:
-                    continue
-        print(f"[VOICE] Device seleccionado: index={args.device} name='{name}'")
+        max_in = dinfo.get("max_input_channels")
+        def_sr = dinfo.get("default_samplerate")
+        print(f"[VOICE] Device fijado: index={args.device} name='{name}' max_input_channels={max_in} default_sr={def_sr}")
     except Exception as exc:
-        print(f"[VOICE] No se pudo consultar dispositivos de audio: {exc}")
+        print(f"[VOICE] No se pudo consultar dispositivos (se usara index={args.device}): {exc}")
 
     # Try opening stream; fallback to device default samplerate when needed
     stream = None

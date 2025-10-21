@@ -58,26 +58,15 @@ def main() -> None:
         audio_q.put(bytes(indata))
 
     print(">>> Probando Vosk, habla cerca del micro. Ctrl+C para salir. (device=%s, rate=%s)" % (args.device, args.rate))
-    # Validate device and pick alternative if needed
+    # Log selected device info; do not auto-switch
     try:
         dinfo = sd.query_devices(args.device)
         name = dinfo.get("name")
-        if int(dinfo.get("max_input_channels") or 0) < 1:
-            print(f"[CHECK] Device {args.device} ('{name}') sin canales de entrada, buscando alternativo...")
-            for idx, _ in enumerate(sd.query_devices()):
-                try:
-                    d2 = sd.query_devices(idx)
-                    if int(d2.get("max_input_channels") or 0) > 0:
-                        args.device = idx
-                        name = d2.get("name")
-                        print(f"[CHECK] Usando dispositivo alternativo index={idx} name='{name}'")
-                        break
-                except Exception:
-                    continue
-        else:
-            print(f"[CHECK] Device seleccionado: index={args.device} name='{name}'")
+        max_in = dinfo.get("max_input_channels")
+        def_sr = dinfo.get("default_samplerate")
+        print(f"[CHECK] Device fijado: index={args.device} name='{name}' max_input_channels={max_in} default_sr={def_sr}")
     except Exception as exc:
-        print(f"[CHECK] No se pudo consultar dispositivos: {exc}")
+        print(f"[CHECK] No se pudo consultar dispositivos (se usara index={args.device}): {exc}")
 
     channels = 1
     stream = None

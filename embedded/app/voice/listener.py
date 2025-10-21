@@ -81,35 +81,18 @@ class VoiceIntentListener:
         except Exception:
             logger.error("VOICE_LISTENER_DEVICE debe ser un indice entero valido (ej. 2)")
             return
-        # Validate selected device and auto-pick a working input device if needed
+        # Log selected device info (no auto-switch to other devices)
         try:
             info = sd.query_devices(self._device_index)
             name = info.get("name")
-            max_in = int(info.get("max_input_channels") or 0)
-            def_sr = float(info.get("default_samplerate") or self.config.rate)
-            if max_in < 1:
-                logger.warning(
-                    "Dispositivo {} ('{}') no tiene canales de entrada (max_input_channels={}); buscando alternativo",
-                    self._device_index, name, max_in,
-                )
-                # Auto-pick first device with input channels
-                for idx, dev in enumerate(sd.query_devices()):
-                    try:
-                        dinfo = sd.query_devices(idx)
-                        if int(dinfo.get("max_input_channels") or 0) > 0:
-                            self._device_index = idx
-                            name = dinfo.get("name")
-                            def_sr = float(dinfo.get("default_samplerate") or self.config.rate)
-                            logger.info("Usando dispositivo de entrada alternativo index={} name='{}'", idx, name)
-                            break
-                    except Exception:
-                        continue
+            max_in = info.get("max_input_channels")
+            def_sr = info.get("default_samplerate")
             logger.info(
-                "Audio device seleccionado: index={} name='{}' max_input_channels={} default_sr={}",
+                "Audio device fijado: index={} name='{}' max_input_channels={} default_sr={}",
                 self._device_index, name, max_in, def_sr,
             )
         except Exception as exc:
-            logger.warning("No se pudo consultar dispositivos de audio: {}", exc)
+            logger.warning("No se pudo consultar dispositivos de audio (se usara index={}): {}", self._device_index, exc)
         self._audio_queue = queue.Queue()
         self._refresh_session_flag()
         self._stop_event.clear()
