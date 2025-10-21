@@ -177,30 +177,65 @@ def main() -> None:
     # Log the provided specs for clarity
     print(f"[VOICE] Args: --device-spec={args.device_spec!r} --device={args.device!r}")
 
-    res = None
-    for spec in (args.device_spec, args.device):
-        res = resolve_device(spec, None, DEFAULT_DEVICE)
-        if res is not None:
-            break
-    if res is None:
-        # Final fallback to default index
+    # Prefer using the provided device name string verbatim to avoid index drift
+    if args.device_spec and str(args.device_spec).strip():
+        device_param = str(args.device_spec).strip()
+        # Best-effort to find its index for logging
         try:
-            d = sd.query_devices(DEFAULT_DEVICE)
-            device_param, resolved_index, resolved_name = DEFAULT_DEVICE, DEFAULT_DEVICE, d.get("name")
+            devs = sd.query_devices()
+            idx = None
+            for i, d in enumerate(devs):
+                if str(d.get("name") or "") == device_param:
+                    idx = i
+                    resolved_name = device_param
+                    break
+            if idx is None:
+                low = device_param.lower()
+                for i, d in enumerate(devs):
+                    name = str(d.get("name") or "")
+                    if low in name.lower():
+                        idx = i
+                        resolved_name = name
+                        break
+            resolved_index = idx if idx is not None else -1
+            if idx is None:
+                resolved_name = device_param
         except Exception:
-            device_param, resolved_index, resolved_name = DEFAULT_DEVICE, DEFAULT_DEVICE, None
+            resolved_index = -1
+            resolved_name = device_param
     else:
-        device_param, resolved_index, resolved_name = res
+        # No name provided; resolve from --device (could be index or name)
+        res = None
+        for spec in (args.device,):
+            res = resolve_device(spec, None, DEFAULT_DEVICE)
+            if res is not None:
+                break
+        if res is None:
+            try:
+                d = sd.query_devices(DEFAULT_DEVICE)
+                device_param, resolved_index, resolved_name = DEFAULT_DEVICE, DEFAULT_DEVICE, d.get("name")
+            except Exception:
+                device_param, resolved_index, resolved_name = DEFAULT_DEVICE, DEFAULT_DEVICE, None
+        else:
+            device_param, resolved_index, resolved_name = res
 
     # Log selected device info; do not auto-switch
     try:
-        dinfo = sd.query_devices(device_param)
-        name = dinfo.get("name")
-        max_in = int(dinfo.get("max_input_channels") or 0)
-        def_sr = dinfo.get("default_samplerate")
-        print(f"[VOICE] Device resuelto: index={resolved_index} name='{name}' max_input_channels={max_in} default_sr={def_sr}")
+        # If we have an index, query details; otherwise log the provided name
+        if isinstance(device_param, (int,)) or (isinstance(resolved_index, int) and resolved_index >= 0):
+            dinfo = sd.query_devices(resolved_index if resolved_index >= 0 else device_param)
+            name = dinfo.get("name")
+            max_in = int(dinfo.get("max_input_channels") or 0)
+            def_sr = dinfo.get("default_samplerate")
+            print(f"[VOICE] Device resuelto: index={resolved_index} name='{name}' max_input_channels={max_in} default_sr={def_sr}")
+        else:
+            # We couldn't map the name to an index, but we'll still try opening the stream by name
+            name = str(device_param)
+            max_in = -1
+            def_sr = None
+            print(f"[VOICE] Device resuelto por nombre: name='{name}' (index desconocido)")
         # If device supports stereo input, capture both and downmix to mono for Vosk
-        if max_in >= 2:
+        if isinstance(max_in, int) and max_in >= 2:
             channels = 2
     except Exception as exc:
         print(f"[VOICE] No se pudo consultar dispositivos (se usara device={device_param!r}): {exc}")
@@ -219,7 +254,7 @@ def main() -> None:
         stream.start()
     except Exception as exc1:
         try:
-            d = sd.query_devices(device_param)
+            d = sd.query_devices(resolved_index if isinstance(resolved_index, int) and resolved_index >= 0 else device_param)
             name = d.get("name")
             def_sr = int(float(d.get("default_samplerate") or args.rate))
         except Exception:
