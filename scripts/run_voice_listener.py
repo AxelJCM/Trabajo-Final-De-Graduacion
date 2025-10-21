@@ -8,6 +8,13 @@ import queue
 import sys
 import time
 from typing import Dict, Optional, Tuple
+from pathlib import Path
+
+# Ensure 'embedded' is on sys.path so that 'app.*' imports resolve even when running from repo root
+REPO_ROOT = Path(__file__).resolve().parent.parent
+EMBEDDED_DIR = REPO_ROOT / "embedded"
+if str(EMBEDDED_DIR) not in sys.path:
+    sys.path.insert(0, str(EMBEDDED_DIR))
 
 import requests
 import sounddevice as sd
@@ -21,7 +28,7 @@ except Exception as exc:  # pragma: no cover
     sys.exit(1)
 
 DEFAULT_RATE = 16000
-DEFAULT_DEVICE = None
+DEFAULT_DEVICE = 2
 
 INTENT_ACTIONS: Dict[str, Tuple[str, str, Optional[dict]]] = {
     "start": ("POST", "/session/start", {"exercise": "squat"}),
@@ -88,7 +95,8 @@ def main() -> None:
     print("[VOICE] Listening... (Ctrl+C to exit)")
 
     if args.device is None:
-        raise SystemExit("[VOICE] Provide --device with the sounddevice index (ej. 2)")
+        args.device = DEFAULT_DEVICE
+        print(f"[VOICE] Usando device por defecto: {args.device}")
 
     try:
         stream = sd.RawInputStream(

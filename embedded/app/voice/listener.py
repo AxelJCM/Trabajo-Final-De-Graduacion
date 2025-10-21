@@ -68,8 +68,9 @@ class VoiceIntentListener:
             logger.warning("Requests no disponible; listener de voz deshabilitado")
             return
         if self.config.device is None:
-            logger.warning("VOICE_LISTENER_DEVICE no configurado; listener de voz deshabilitado")
-            return
+            # Default to device index 2 as requested
+            logger.info("VOICE_LISTENER_DEVICE no configurado; usando device=2 por defecto")
+            self.config.device = 2
         try:
             self._device_index = int(self.config.device)
         except Exception:
@@ -233,6 +234,9 @@ class VoiceIntentListener:
 
     def _ensure_session_started(self, intent: str) -> bool:
         if intent == "start":
+            return True
+        if intent == "stop":
+            # Permitir detener incluso si no hay sesion activa
             return True
         if self._session_started:
             return True
