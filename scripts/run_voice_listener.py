@@ -45,6 +45,12 @@ INTENT_ACTIONS: Dict[str, Tuple[str, str, Optional[dict]]] = {
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Real-time voice listener")
     parser.add_argument("--device", type=int, default=DEFAULT_DEVICE, help="Input device index (sounddevice)")
+    parser.add_argument(
+        "--device-spec",
+        type=str,
+        default=None,
+        help="Audio device spec: name or substring (overrides --device if provided)",
+    )
     parser.add_argument("--rate", type=int, default=DEFAULT_RATE, help="Sample rate")
     parser.add_argument("--blocksize", type=int, default=8000, help="Audio block size")
     parser.add_argument("--base-url", default="http://127.0.0.1:8000", help="Backend base URL")
@@ -115,18 +121,46 @@ def main() -> None:
         args.device = DEFAULT_DEVICE
         print(f"[VOICE] Usando device por defecto: {args.device}")
 
+    # Resolve device by name or index
+    def resolve_device(spec: Optional[str], fallback_index: int) -> int:
+        if spec is None or not str(spec).strip():
+            return fallback_index
+        s = str(spec).strip()
+        # Numeric string -> index
+        try:
+            return int(s)
+        except Exception:
+            pass
+        try:
+            devs = sd.query_devices()
+            # exact match first
+            for i, d in enumerate(devs):
+                if str(d.get("name") or "") == s:
+                    return i
+            # substring match
+            low = s.lower()
+            for i, d in enumerate(devs):
+                name = str(d.get("name") or "")
+                if low in name.lower():
+                    return i
+        except Exception:
+            pass
+        return fallback_index
+
+    resolved_device = resolve_device(args.device_spec, args.device)
+
     # Log selected device info; do not auto-switch
     try:
-        dinfo = sd.query_devices(args.device)
+        dinfo = sd.query_devices(resolved_device)
         name = dinfo.get("name")
         max_in = int(dinfo.get("max_input_channels") or 0)
         def_sr = dinfo.get("default_samplerate")
-        print(f"[VOICE] Device fijado: index={args.device} name='{name}' max_input_channels={max_in} default_sr={def_sr}")
+        print(f"[VOICE] Device resuelto: index={resolved_device} name='{name}' max_input_channels={max_in} default_sr={def_sr}")
         # If device supports stereo input, capture both and downmix to mono for Vosk
         if max_in >= 2:
             channels = 2
     except Exception as exc:
-        print(f"[VOICE] No se pudo consultar dispositivos (se usara index={args.device}): {exc}")
+        print(f"[VOICE] No se pudo consultar dispositivos (se usara index={resolved_device}): {exc}")
 
     # Try opening stream; fallback to device default samplerate when needed
     stream = None
@@ -134,7 +168,7 @@ def main() -> None:
         stream = sd.RawInputStream(
             samplerate=args.rate,
             blocksize=args.blocksize,
-            device=args.device,
+            device=resolved_device,
             dtype="int16",
             channels=channels,
             callback=audio_callback,
@@ -142,7 +176,7 @@ def main() -> None:
         stream.start()
     except Exception as exc1:
         try:
-            d = sd.query_devices(args.device)
+            d = sd.query_devices(resolved_device)
             def_sr = int(float(d.get("default_samplerate") or args.rate))
         except Exception:
             def_sr = args.rate
@@ -152,7 +186,7 @@ def main() -> None:
                 stream = sd.RawInputStream(
                     samplerate=def_sr,
                     blocksize=args.blocksize,
-                    device=args.device,
+                    device=resolved_device,
                     dtype="int16",
                     channels=channels,
                     callback=audio_callback,
@@ -166,7 +200,7 @@ def main() -> None:
                     stream = sd.RawInputStream(
                         samplerate=def_sr,
                         blocksize=args.blocksize,
-                        device=args.device,
+                        device=resolved_device,
                         dtype="int16",
                         channels=2,
                         callback=audio_callback,
@@ -185,7 +219,7 @@ def main() -> None:
                 stream = sd.RawInputStream(
                     samplerate=args.rate,
                     blocksize=args.blocksize,
-                    device=args.device,
+                    device=resolved_device,
                     dtype="int16",
                     channels=2,
                     callback=audio_callback,
