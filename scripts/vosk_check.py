@@ -4,11 +4,11 @@
 Usage (PowerShell on Windows):
   # Ensure your venv is activated and deps installed
   # Optionally set VOSK_MODEL_PATH if the model is not autodetected
-  # Default device=2; override with --device N
-  python scripts/vosk_check.py --device 2
+    # Default device=3; override with --device N
+    python scripts/vosk_check.py --device 3
 
 On Linux/Raspberry Pi (bash):
-  PYTHONPATH=embedded python scripts/vosk_check.py --device 2
+    PYTHONPATH=embedded python scripts/vosk_check.py --device 3
 """
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ import vosk
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser()
-    p.add_argument("--device", type=int, default=2, help="Indice del micro (sounddevice)")
+    p.add_argument("--device", type=int, default=3, help="Indice del micro (sounddevice)")
     p.add_argument("--rate", type=int, default=16000)
     return p.parse_args()
 

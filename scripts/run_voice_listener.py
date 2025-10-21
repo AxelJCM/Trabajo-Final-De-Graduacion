@@ -32,7 +32,7 @@ except Exception as exc:  # pragma: no cover
     sys.exit(1)
 
 DEFAULT_RATE = 16000
-DEFAULT_DEVICE = 2
+DEFAULT_DEVICE = 3
 
 INTENT_ACTIONS: Dict[str, Tuple[str, str, Optional[dict]]] = {
     "start": ("POST", "/session/start", {"exercise": "squat"}),

@@ -68,9 +68,9 @@ class VoiceIntentListener:
             logger.warning("Requests no disponible; listener de voz deshabilitado")
             return
         if self.config.device is None:
-            # Default to device index 2 as requested
-            logger.info("VOICE_LISTENER_DEVICE no configurado; usando device=2 por defecto")
-            self.config.device = 2
+            # Default to device index 3 as requested
+            logger.info("VOICE_LISTENER_DEVICE no configurado; usando device=3 por defecto")
+            self.config.device = 3
         try:
             self._device_index = int(self.config.device)
         except Exception:
