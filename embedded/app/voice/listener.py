@@ -8,6 +8,10 @@ import time
 from dataclasses import dataclass
 from typing import Optional
 from loguru import logger
+try:
+    import numpy as np  # type: ignore
+except Exception:  # pragma: no cover
+    np = None  # type: ignore
 
 from app.voice.recognizer import VoiceRecognizer, map_utterance_to_intent
 
@@ -54,6 +58,7 @@ class VoiceIntentListener:
         self._session_started: bool = False
         self._last_prompt_ts: float = 0.0
         self._device_index: Optional[int] = None
+        self._channels = 1
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -169,7 +174,23 @@ class VoiceIntentListener:
     def _audio_callback(self, indata, frames, time_info, status) -> None:  # pragma: no cover - callback
         if status:
             logger.debug("Audio status: {}", status)
-        self._audio_queue.put(bytes(indata))
+        # Downmix to mono if needed for Vosk
+        if self._channels <= 1 or np is None:
+            self._audio_queue.put(bytes(indata))
+        else:
+            try:
+                buf = np.frombuffer(indata, dtype=np.int16)
+                ch = self._channels
+                if ch > 1 and buf.size >= ch:
+                    n = buf.size // ch
+                    if n * ch != buf.size:
+                        buf = buf[: n * ch]
+                    mono = buf.reshape((n, ch)).mean(axis=1).astype(np.int16)
+                    self._audio_queue.put(mono.tobytes())
+                else:
+                    self._audio_queue.put(bytes(indata))
+            except Exception:
+                self._audio_queue.put(bytes(indata))
 
     def _run(self) -> None:
         try:
@@ -177,9 +198,6 @@ class VoiceIntentListener:
         except Exception as exc:  # pragma: no cover
             logger.error("No se pudo crear reconocedor Vosk: {}", exc)
             return
-
-        block_seconds = self.config.blocksize / float(self.config.rate)
-        buffer_since_speech = 0.0
 
         self._audio_queue = queue.Queue()
         stream = None
@@ -196,6 +214,9 @@ class VoiceIntentListener:
                 callback=self._audio_callback,
             )
             stream.start()
+            block_seconds = self.config.blocksize / float(sr_in_use)
+            buffer_since_speech = 0.0
+            self._channels = channels
         except Exception as exc1:  # pragma: no cover
             # Attempt fallback to device default sample rate
             try:
@@ -215,6 +236,9 @@ class VoiceIntentListener:
                         callback=self._audio_callback,
                     )
                     stream.start()
+                    block_seconds = self.config.blocksize / float(def_sr)
+                    buffer_since_speech = 0.0
+                    self._channels = channels
                     sr_in_use = def_sr
                     try:
                         vosk_recognizer = vosk.KaldiRecognizer(self._vosk_model, sr_in_use)
@@ -233,6 +257,9 @@ class VoiceIntentListener:
                             callback=self._audio_callback,
                         )
                         stream.start()
+                        block_seconds = self.config.blocksize / float(def_sr)
+                        buffer_since_speech = 0.0
+                        self._channels = 2
                         channels = 2
                         sr_in_use = def_sr
                         try:
@@ -258,6 +285,9 @@ class VoiceIntentListener:
                         callback=self._audio_callback,
                     )
                     stream.start()
+                    block_seconds = self.config.blocksize / float(sr_in_use)
+                    buffer_since_speech = 0.0
+                    self._channels = 2
                     channels = 2
                 except Exception as exc2:
                     logger.error("No se pudo abrir stream de audio (device={}): {} | channels=2 -> {}", self._device_index, exc1, exc2)
@@ -288,10 +318,8 @@ class VoiceIntentListener:
                     vosk_recognizer.Reset()
                     buffer_since_speech = 0.0
                 else:
-                    buffer_since_speech += block_seconds
-                    if buffer_since_speech >= self.config.silence_window:
-                        vosk_recognizer.Reset()
-                        buffer_since_speech = 0.0
+                    # Evita resets agresivos; permite que Vosk determine cortes de frase
+                    pass
         finally:
             try:
                 if stream:
