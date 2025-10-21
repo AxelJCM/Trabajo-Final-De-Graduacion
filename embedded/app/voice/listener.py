@@ -8,10 +8,6 @@ import time
 from dataclasses import dataclass
 from typing import Optional
 from loguru import logger
-try:
-    import numpy as np  # type: ignore
-except Exception:  # pragma: no cover
-    np = None  # type: ignore
 
 from app.voice.recognizer import VoiceRecognizer, map_utterance_to_intent
 
@@ -58,7 +54,6 @@ class VoiceIntentListener:
         self._session_started: bool = False
         self._last_prompt_ts: float = 0.0
         self._device_index: Optional[int] = None
-        self._channels = 1
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -81,18 +76,7 @@ class VoiceIntentListener:
         except Exception:
             logger.error("VOICE_LISTENER_DEVICE debe ser un indice entero valido (ej. 2)")
             return
-        # Log selected device info (no auto-switch to other devices)
-        try:
-            info = sd.query_devices(self._device_index)
-            name = info.get("name")
-            max_in = info.get("max_input_channels")
-            def_sr = info.get("default_samplerate")
-            logger.info(
-                "Audio device fijado: index={} name='{}' max_input_channels={} default_sr={}",
-                self._device_index, name, max_in, def_sr,
-            )
-        except Exception as exc:
-            logger.warning("No se pudo consultar dispositivos de audio (se usara index={}): {}", self._device_index, exc)
+        # No consultamos ni cambiamos de dispositivo; queda fijo
         self._audio_queue = queue.Queue()
         self._refresh_session_flag()
         self._stop_event.clear()
@@ -157,23 +141,7 @@ class VoiceIntentListener:
     def _audio_callback(self, indata, frames, time_info, status) -> None:  # pragma: no cover - callback
         if status:
             logger.debug("Audio status: {}", status)
-        # Downmix to mono if needed for Vosk
-        if self._channels <= 1 or np is None:
-            self._audio_queue.put(bytes(indata))
-        else:
-            try:
-                buf = np.frombuffer(indata, dtype=np.int16)
-                ch = self._channels
-                if ch > 1 and buf.size >= ch:
-                    n = buf.size // ch
-                    if n * ch != buf.size:
-                        buf = buf[: n * ch]
-                    mono = buf.reshape((n, ch)).mean(axis=1).astype(np.int16)
-                    self._audio_queue.put(mono.tobytes())
-                else:
-                    self._audio_queue.put(bytes(indata))
-            except Exception:
-                self._audio_queue.put(bytes(indata))
+        self._audio_queue.put(bytes(indata))
 
     def _run(self) -> None:
         try:
@@ -184,97 +152,22 @@ class VoiceIntentListener:
 
         self._audio_queue = queue.Queue()
         stream = None
-        # Try opening stream; on failure due to sample rate, fallback to device default
-        sr_in_use = self.config.rate
-        channels = 1
+        # Intento único con parámetros fijos (dispositivo e índices estáticos)
         try:
             stream = sd.RawInputStream(
-                samplerate=sr_in_use,
+                samplerate=self.config.rate,
                 blocksize=self.config.blocksize,
                 device=self._device_index,
                 dtype="int16",
-                channels=channels,
+                channels=1,
                 callback=self._audio_callback,
             )
             stream.start()
-            block_seconds = self.config.blocksize / float(sr_in_use)
+            block_seconds = self.config.blocksize / float(self.config.rate)
             buffer_since_speech = 0.0
-            self._channels = channels
-        except Exception as exc1:  # pragma: no cover
-            # Attempt fallback to device default sample rate
-            try:
-                dinfo = sd.query_devices(self._device_index)
-                def_sr = int(float(dinfo.get("default_samplerate") or sr_in_use))
-            except Exception:
-                def_sr = sr_in_use
-            if def_sr != sr_in_use:
-                try:
-                    logger.info("Reintentando stream con sample_rate={} (device={})", def_sr, self._device_index)
-                    stream = sd.RawInputStream(
-                        samplerate=def_sr,
-                        blocksize=self.config.blocksize,
-                        device=self._device_index,
-                        dtype="int16",
-                        channels=channels,
-                        callback=self._audio_callback,
-                    )
-                    stream.start()
-                    block_seconds = self.config.blocksize / float(def_sr)
-                    buffer_since_speech = 0.0
-                    self._channels = channels
-                    sr_in_use = def_sr
-                    try:
-                        vosk_recognizer = vosk.KaldiRecognizer(self._vosk_model, sr_in_use)
-                    except Exception:
-                        pass
-                except Exception as exc2:  # pragma: no cover
-                    # Try channels=2 as a last resort
-                    try:
-                        logger.info("Reintentando con channels=2 y sample_rate={} (device={})", def_sr, self._device_index)
-                        stream = sd.RawInputStream(
-                            samplerate=def_sr,
-                            blocksize=self.config.blocksize,
-                            device=self._device_index,
-                            dtype="int16",
-                            channels=2,
-                            callback=self._audio_callback,
-                        )
-                        stream.start()
-                        block_seconds = self.config.blocksize / float(def_sr)
-                        buffer_since_speech = 0.0
-                        self._channels = 2
-                        channels = 2
-                        sr_in_use = def_sr
-                        try:
-                            vosk_recognizer = vosk.KaldiRecognizer(self._vosk_model, sr_in_use)
-                        except Exception:
-                            pass
-                    except Exception as exc3:
-                        logger.error(
-                            "No se pudo abrir stream (device={}): {} | fallback_sr={} -> {} | fallback_channels=2 -> {}",
-                            self._device_index, exc1, def_sr, exc2, exc3,
-                        )
-                        return
-            else:
-                # Try channels=2 with original sample rate
-                try:
-                    logger.info("Reintentando con channels=2 (device={})", self._device_index)
-                    stream = sd.RawInputStream(
-                        samplerate=sr_in_use,
-                        blocksize=self.config.blocksize,
-                        device=self._device_index,
-                        dtype="int16",
-                        channels=2,
-                        callback=self._audio_callback,
-                    )
-                    stream.start()
-                    block_seconds = self.config.blocksize / float(sr_in_use)
-                    buffer_since_speech = 0.0
-                    self._channels = 2
-                    channels = 2
-                except Exception as exc2:
-                    logger.error("No se pudo abrir stream de audio (device={}): {} | channels=2 -> {}", self._device_index, exc1, exc2)
-                    return
+        except Exception as exc:  # pragma: no cover
+            logger.error("No se pudo abrir stream de audio (device={}): {}", self._device_index, exc)
+            return
 
         try:
             while not self._stop_event.is_set():
@@ -301,7 +194,7 @@ class VoiceIntentListener:
                     vosk_recognizer.Reset()
                     buffer_since_speech = 0.0
                 else:
-                    # Evita resets agresivos; permite que Vosk determine cortes de frase
+                    # Sin resets agresivos; Vosk decide los cortes de frase
                     pass
         finally:
             try:
