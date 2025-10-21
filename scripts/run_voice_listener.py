@@ -34,11 +34,14 @@ except Exception as exc:  # pragma: no cover
 DEFAULT_RATE = 16000
 DEFAULT_DEVICE = 3
 
+# Exercise cycling state and mapping for intents
+EXERCISE_CYCLE = ["squat", "pushup", "crunch"]
+cycle_index = 0  # will be advanced on 'next'
+
 INTENT_ACTIONS: Dict[str, Tuple[str, str, Optional[dict]]] = {
-    "start": ("POST", "/session/start", {"exercise": "squat"}),
+    # 'start' and 'next' are handled dynamically to honor cycling
     "pause": ("POST", "/session/pause", {}),
     "stop": ("POST", "/session/stop", {}),
-    "next": ("POST", "/session/exercise", {"exercise": "pushup", "reset": True}),
 }
 
 
@@ -67,13 +70,30 @@ def parse_args() -> argparse.Namespace:
 
 
 def trigger_intent(intent: str, base_url: str) -> None:
-    action = INTENT_ACTIONS.get(intent)
-    if not action:
-        print(f"[VOICE] Intent '{intent}' detected (no action configured)")
-        return
-    method, path, payload = action
-    url = base_url.rstrip("/") + path
+    global cycle_index
+    base = base_url.rstrip("/")
     try:
+        if intent == "start":
+            exercise = EXERCISE_CYCLE[cycle_index]
+            url = base + "/session/start"
+            resp = requests.post(url, json={"exercise": exercise, "reset": True}, timeout=5)
+            resp.raise_for_status()
+            print(f"[VOICE] Intent 'start' executed -> {url} ({exercise})")
+            return
+        if intent == "next":
+            cycle_index = (cycle_index + 1) % len(EXERCISE_CYCLE)
+            exercise = EXERCISE_CYCLE[cycle_index]
+            url = base + "/session/exercise"
+            resp = requests.post(url, json={"exercise": exercise, "reset": True}, timeout=5)
+            resp.raise_for_status()
+            print(f"[VOICE] Intent 'next' executed -> {url} ({exercise})")
+            return
+        action = INTENT_ACTIONS.get(intent)
+        if not action:
+            print(f"[VOICE] Intent '{intent}' detected (no action configured)")
+            return
+        method, path, payload = action
+        url = base + path
         if method.upper() == "POST":
             resp = requests.post(url, json=payload, timeout=5)
         else:
