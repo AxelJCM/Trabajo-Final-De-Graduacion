@@ -53,6 +53,7 @@ class VoiceIntentListener:
         self._cycle_index = 0
         self._session_started: bool = False
         self._last_prompt_ts: float = 0.0
+        self._device_index: Optional[int] = None
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -66,11 +67,20 @@ class VoiceIntentListener:
         if requests is None:
             logger.warning("Requests no disponible; listener de voz deshabilitado")
             return
+        if self.config.device is None:
+            logger.warning("VOICE_LISTENER_DEVICE no configurado; listener de voz deshabilitado")
+            return
+        try:
+            self._device_index = int(self.config.device)
+        except Exception:
+            logger.error("VOICE_LISTENER_DEVICE debe ser un indice entero valido (ej. 2)")
+            return
+        self._audio_queue = queue.Queue()
         self._refresh_session_flag()
         self._stop_event.clear()
         self._thread = threading.Thread(target=self._run, name="VoiceIntentListener", daemon=True)
         self._thread.start()
-        logger.info("Voice intent listener iniciado (device={} rate={})", self.config.device, self.config.rate)
+        logger.info("Voice intent listener iniciado (device={} rate={})", self._device_index, self.config.rate)
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -141,35 +151,20 @@ class VoiceIntentListener:
         block_seconds = self.config.blocksize / float(self.config.rate)
         buffer_since_speech = 0.0
 
+        self._audio_queue = queue.Queue()
         stream = None
-        device_arg = self.config.device
-        candidates: list[object] = []
-        if device_arg is not None:
-            candidates.append(device_arg)
-            if isinstance(device_arg, int):
-                candidates.extend([f"hw:{device_arg},0", f"plughw:{device_arg},0"])
-        else:
-            candidates.append(None)
-        last_exc: Exception | None = None
-        for candidate in candidates:
-            try:
-                stream = sd.RawInputStream(
-                    samplerate=self.config.rate,
-                    blocksize=self.config.blocksize,
-                    device=candidate,
-                    dtype="int16",
-                    channels=1,
-                    callback=self._audio_callback,
-                )
-                stream.start()
-                device_arg = candidate
-                break
-            except Exception as exc:  # pragma: no cover
-                last_exc = exc
-                logger.warning("No se pudo abrir stream de audio (device={}): {}", candidate, exc)
-                stream = None
-        if stream is None:
-            logger.error("No se pudo inicializar ningun stream de audio; listener detenido")
+        try:
+            stream = sd.RawInputStream(
+                samplerate=self.config.rate,
+                blocksize=self.config.blocksize,
+                device=self._device_index,
+                dtype="int16",
+                channels=1,
+                callback=self._audio_callback,
+            )
+            stream.start()
+        except Exception as exc:  # pragma: no cover
+            logger.error("No se pudo abrir stream de audio (device={}): {}", self._device_index, exc)
             return
 
         try:
