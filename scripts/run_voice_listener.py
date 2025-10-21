@@ -197,6 +197,26 @@ def main() -> None:
                         idx = i
                         resolved_name = name
                         break
+            # Fuzzy pass: normalize and try token-based containment if still not found
+            if idx is None:
+                import re
+                def norm(s: str) -> str:
+                    return re.sub(r"[^a-z0-9]+", " ", s.lower()).strip()
+                spec_norm = norm(device_param)
+                spec_tokens = [t for t in spec_norm.split() if t]
+                for i, d in enumerate(devs):
+                    name = str(d.get("name") or "")
+                    cand = norm(name)
+                    if spec_norm and spec_norm in cand:
+                        idx = i
+                        resolved_name = name
+                        break
+                    # Require at least 2 token matches for a fuzzy hit
+                    matches = sum(1 for t in spec_tokens if t in cand)
+                    if len(spec_tokens) >= 3 and matches >= 2:
+                        idx = i
+                        resolved_name = name
+                        break
             resolved_index = idx if idx is not None else -1
             if idx is None:
                 resolved_name = device_param
@@ -221,19 +241,29 @@ def main() -> None:
 
     # Log selected device info; do not auto-switch
     try:
-        # If we have an index, query details; otherwise log the provided name
-        if isinstance(device_param, (int,)) or (isinstance(resolved_index, int) and resolved_index >= 0):
-            dinfo = sd.query_devices(resolved_index if resolved_index >= 0 else device_param)
+        # If we have an index, query details; otherwise log the provided name and dump device list to aid debugging
+        if isinstance(resolved_index, int) and resolved_index >= 0:
+            dinfo = sd.query_devices(resolved_index)
             name = dinfo.get("name")
             max_in = int(dinfo.get("max_input_channels") or 0)
             def_sr = dinfo.get("default_samplerate")
             print(f"[VOICE] Device resuelto: index={resolved_index} name='{name}' max_input_channels={max_in} default_sr={def_sr}")
         else:
-            # We couldn't map the name to an index, but we'll still try opening the stream by name
             name = str(device_param)
             max_in = -1
             def_sr = None
             print(f"[VOICE] Device resuelto por nombre: name='{name}' (index desconocido)")
+            # List devices to help find proper substring
+            try:
+                devs = sd.query_devices()
+                print("[VOICE] Dispositivos disponibles en este proceso:")
+                for i, d in enumerate(devs):
+                    nm = d.get("name")
+                    mi = int(d.get("max_input_channels") or 0)
+                    dsr = d.get("default_samplerate")
+                    print(f"  [{i}] name='{nm}' max_input_channels={mi} default_sr={dsr}")
+            except Exception:
+                pass
         # If device supports stereo input, capture both and downmix to mono for Vosk
         if isinstance(max_in, int) and max_in >= 2:
             channels = 2

@@ -73,8 +73,13 @@ wait_for_api || exit 1
 # Voice listener (best effort; falls back gracefully if deps missing)
 LISTENER_ARGS=("${ROOT_DIR}/scripts/run_voice_listener.py" "--base-url" "${BASE_URL}")
 if [ -n "${VOICE_LISTENER_DEVICE:-}" ]; then
-  # Pass as --device-spec so it can be an index or a name string
-  LISTENER_ARGS+=("--device-spec" "${VOICE_LISTENER_DEVICE}")
+  if [[ "${VOICE_LISTENER_DEVICE}" =~ ^[0-9]+$ ]]; then
+    # Numeric -> pass as --device (index), to mimic vosk_check behavior exactly
+    LISTENER_ARGS+=("--device" "${VOICE_LISTENER_DEVICE}")
+  else
+    # String -> pass as --device-spec (name or substring)
+    LISTENER_ARGS+=("--device-spec" "${VOICE_LISTENER_DEVICE}")
+  fi
 fi
 if [ -n "${VOICE_LISTENER_RATE:-}" ]; then
   LISTENER_ARGS+=("--rate" "${VOICE_LISTENER_RATE}")
@@ -88,7 +93,7 @@ fi
 if [ -n "${VOICE_LISTENER_DEDUPE_SECONDS:-}" ]; then
   LISTENER_ARGS+=("--dedupe-seconds" "${VOICE_LISTENER_DEDUPE_SECONDS}")
 fi
-start_process voice python "${LISTENER_ARGS[@]}"
+start_process voice "${APP_DIR}/.venv/bin/python" "${LISTENER_ARGS[@]}"
 
 if [ "${HUD_MODE}" == "overlay" ]; then
   start_process hud python -m app.gui.mirror_gui --overlay --base-url "${BASE_URL}"
