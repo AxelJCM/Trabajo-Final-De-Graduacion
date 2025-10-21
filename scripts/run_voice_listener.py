@@ -18,6 +18,10 @@ if str(EMBEDDED_DIR) not in sys.path:
 
 import requests
 import sounddevice as sd
+try:
+    import numpy as np  # type: ignore
+except Exception:  # pragma: no cover
+    np = None  # type: ignore
 
 from app.voice.recognizer import VoiceRecognizer, map_utterance_to_intent
 
@@ -90,7 +94,20 @@ def main() -> None:
     def audio_callback(indata, frames, time_info, status):  # pragma: no cover
         if status:
             print(f"[VOICE] Audio status: {status}")
-        audio_queue.put(bytes(indata))
+        if channels <= 1 or np is None:
+            audio_queue.put(bytes(indata))
+        else:
+            try:
+                buf = np.frombuffer(indata, dtype=np.int16)
+                ch = channels
+                n = buf.size // ch
+                if n > 0:
+                    buf = buf[: n * ch].reshape((n, ch)).mean(axis=1).astype(np.int16)
+                    audio_queue.put(buf.tobytes())
+                else:
+                    audio_queue.put(bytes(indata))
+            except Exception:
+                audio_queue.put(bytes(indata))
 
     print("[VOICE] Listening... (Ctrl+C to exit)")
 
@@ -102,9 +119,12 @@ def main() -> None:
     try:
         dinfo = sd.query_devices(args.device)
         name = dinfo.get("name")
-        max_in = dinfo.get("max_input_channels")
+        max_in = int(dinfo.get("max_input_channels") or 0)
         def_sr = dinfo.get("default_samplerate")
         print(f"[VOICE] Device fijado: index={args.device} name='{name}' max_input_channels={max_in} default_sr={def_sr}")
+        # If device supports stereo input, capture both and downmix to mono for Vosk
+        if max_in >= 2:
+            channels = 2
     except Exception as exc:
         print(f"[VOICE] No se pudo consultar dispositivos (se usara index={args.device}): {exc}")
 
@@ -178,8 +198,7 @@ def main() -> None:
                 ) from exc2
 
     try:
-        buffer_since_speech = 0.0
-        block_seconds = args.blocksize / args.rate
+        # Do not force periodic resets; let Vosk decide utterance boundaries
         while True:
             data = audio_queue.get()
             if rec.AcceptWaveform(data):
@@ -199,12 +218,12 @@ def main() -> None:
                     else:
                         print("[VOICE] Intent not recognized")
                 rec.Reset()
-                buffer_since_speech = 0.0
             else:
-                buffer_since_speech += block_seconds
-                if buffer_since_speech >= args.silence_window:
-                    rec.Reset()
-                    buffer_since_speech = 0.0
+                # Optional: print partials for debugging
+                # pr = json.loads(rec.PartialResult())
+                # if pr.get('partial'):
+                #     print(f"[VOICE] Partial: {pr['partial']}")
+                pass
     finally:
         if stream is not None:
             stream.stop()
