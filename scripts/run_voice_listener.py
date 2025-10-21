@@ -62,6 +62,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--base-url", default="http://127.0.0.1:8000", help="Backend base URL")
     parser.add_argument("--silence-window", type=float, default=1.0, help="Seconds of silence to reset recognizer")
     parser.add_argument("--dedupe-seconds", type=float, default=2.0, help="Ignore repeated intents for this window")
+    parser.add_argument("--list-devices", action="store_true", help="List available audio input devices and exit")
     return parser.parse_args()
 
 
@@ -122,57 +123,87 @@ def main() -> None:
                 audio_queue.put(bytes(indata))
 
     print("[VOICE] Listening... (Ctrl+C to exit)")
-
-    # Resolve device by name or index
-    def resolve_device(priority_spec: Optional[str], fallback_spec: Optional[str], default_index: int) -> int:
-        # Try a provided spec (string) as index or name. Falls back to default_index if nothing matches.
-        def _resolve_one(spec: Optional[str]) -> Optional[int]:
+    # Resolve device by name or index, returning a parameter usable by sounddevice
+    def resolve_device(priority_spec: Optional[str], fallback_spec: Optional[str], default_index: int) -> tuple[object, int, Optional[str]]:
+        """Return (device_param, resolved_index, resolved_name).
+        device_param is either an int index or an exact device name string.
+        """
+        def _resolve_one(spec: Optional[str]) -> Optional[tuple[object, int, Optional[str]]]:
             if spec is None:
                 return None
             s = str(spec).strip()
             if not s:
                 return None
-            # Numeric string -> index
+            # If numeric, treat as index
             try:
-                return int(s)
+                idx = int(s)
+                try:
+                    d = sd.query_devices(idx)
+                    return idx, idx, d.get("name")
+                except Exception:
+                    return idx, idx, None
             except Exception:
                 pass
+            # Otherwise, try exact name, then substring
             try:
                 devs = sd.query_devices()
-                # exact match first
                 for i, d in enumerate(devs):
-                    if str(d.get("name") or "") == s:
-                        return i
-                # substring match
+                    name = str(d.get("name") or "")
+                    if name == s:
+                        return name, i, name
                 low = s.lower()
                 for i, d in enumerate(devs):
                     name = str(d.get("name") or "")
                     if low in name.lower():
-                        return i
+                        return name, i, name
             except Exception:
                 return None
             return None
 
-        for spec in (priority_spec, fallback_spec):
-            idx = _resolve_one(spec)
-            if idx is not None:
-                return idx
-        return default_index
+    # Optional: just list devices and exit (useful to compare indices inside the same process)
+    if getattr(args, "list-devices", False):  # pragma: no cover
+        try:
+            devs = sd.query_devices()
+            print("[VOICE] Lista de dispositivos de audio:")
+            for i, d in enumerate(devs):
+                name = d.get("name")
+                max_in = int(d.get("max_input_channels") or 0)
+                def_sr = d.get("default_samplerate")
+                print(f"  [{i}] name='{name}' max_input_channels={max_in} default_sr={def_sr}")
+        except Exception as exc:
+            print(f"[VOICE] No se pudo listar dispositivos: {exc}")
+        return
 
-    resolved_device = resolve_device(args.device_spec, args.device, DEFAULT_DEVICE)
+    # Log the provided specs for clarity
+    print(f"[VOICE] Args: --device-spec={args.device_spec!r} --device={args.device!r}")
+
+    res = None
+    for spec in (args.device_spec, args.device):
+        res = resolve_device(spec, None, DEFAULT_DEVICE)
+        if res is not None:
+            break
+    if res is None:
+        # Final fallback to default index
+        try:
+            d = sd.query_devices(DEFAULT_DEVICE)
+            device_param, resolved_index, resolved_name = DEFAULT_DEVICE, DEFAULT_DEVICE, d.get("name")
+        except Exception:
+            device_param, resolved_index, resolved_name = DEFAULT_DEVICE, DEFAULT_DEVICE, None
+    else:
+        device_param, resolved_index, resolved_name = res
 
     # Log selected device info; do not auto-switch
     try:
-        dinfo = sd.query_devices(resolved_device)
+        dinfo = sd.query_devices(device_param)
         name = dinfo.get("name")
         max_in = int(dinfo.get("max_input_channels") or 0)
         def_sr = dinfo.get("default_samplerate")
-        print(f"[VOICE] Device resuelto: index={resolved_device} name='{name}' max_input_channels={max_in} default_sr={def_sr}")
+        print(f"[VOICE] Device resuelto: index={resolved_index} name='{name}' max_input_channels={max_in} default_sr={def_sr}")
         # If device supports stereo input, capture both and downmix to mono for Vosk
         if max_in >= 2:
             channels = 2
     except Exception as exc:
-        print(f"[VOICE] No se pudo consultar dispositivos (se usara index={resolved_device}): {exc}")
+        print(f"[VOICE] No se pudo consultar dispositivos (se usara device={device_param!r}): {exc}")
 
     # Try opening stream; fallback to device default samplerate when needed
     stream = None
@@ -180,7 +211,7 @@ def main() -> None:
         stream = sd.RawInputStream(
             samplerate=args.rate,
             blocksize=args.blocksize,
-            device=resolved_device,
+            device=device_param,
             dtype="int16",
             channels=channels,
             callback=audio_callback,
@@ -188,17 +219,18 @@ def main() -> None:
         stream.start()
     except Exception as exc1:
         try:
-            d = sd.query_devices(resolved_device)
+            d = sd.query_devices(device_param)
+            name = d.get("name")
             def_sr = int(float(d.get("default_samplerate") or args.rate))
         except Exception:
             def_sr = args.rate
         if def_sr != args.rate:
             try:
-                print(f"[VOICE] Reintentando con sample_rate={def_sr} (device={args.device})")
+                print(f"[VOICE] Reintentando con sample_rate={def_sr} (device={args.device}, resolved_index={resolved_index}, name={name!r})")
                 stream = sd.RawInputStream(
                     samplerate=def_sr,
                     blocksize=args.blocksize,
-                    device=resolved_device,
+                    device=device_param,
                     dtype="int16",
                     channels=channels,
                     callback=audio_callback,
@@ -208,11 +240,11 @@ def main() -> None:
             except Exception as exc2:
                 # Try channels=2
                 try:
-                    print(f"[VOICE] Reintentando con channels=2 y sample_rate={def_sr} (device={args.device})")
+                    print(f"[VOICE] Reintentando con channels=2 y sample_rate={def_sr} (device={args.device}, resolved_index={resolved_index}, name={name!r})")
                     stream = sd.RawInputStream(
                         samplerate=def_sr,
                         blocksize=args.blocksize,
-                        device=resolved_device,
+                        device=device_param,
                         dtype="int16",
                         channels=2,
                         callback=audio_callback,
@@ -222,16 +254,16 @@ def main() -> None:
                     rec = vosk.KaldiRecognizer(vosk_model, def_sr)
                 except Exception as exc3:
                     raise SystemExit(
-                        f"[VOICE] Could not open audio input (device={args.device}): {exc1} | fallback_sr={def_sr} -> {exc2} | fallback_channels=2 -> {exc3}"
+                        f"[VOICE] Could not open audio input (device_arg={args.device!r}, device_spec={args.device_spec!r}, resolved_index={resolved_index}, name={name!r}, device_param={device_param!r}): {exc1} | fallback_sr={def_sr} -> {exc2} | fallback_channels=2 -> {exc3}"
                     ) from exc3
         else:
             # Try channels=2 with original sample rate
             try:
-                print(f"[VOICE] Reintentando con channels=2 (device={args.device})")
+                print(f"[VOICE] Reintentando con channels=2 (device={args.device}, resolved_index={resolved_index})")
                 stream = sd.RawInputStream(
                     samplerate=args.rate,
                     blocksize=args.blocksize,
-                    device=resolved_device,
+                    device=device_param,
                     dtype="int16",
                     channels=2,
                     callback=audio_callback,
@@ -240,7 +272,7 @@ def main() -> None:
                 channels = 2
             except Exception as exc2:
                 raise SystemExit(
-                    f"[VOICE] Could not open audio input (device={args.device}): {exc1} | channels=2 -> {exc2}"
+                    f"[VOICE] Could not open audio input (device_arg={args.device!r}, device_spec={args.device_spec!r}, resolved_index={resolved_index}, device_param={device_param!r}): {exc1} | channels=2 -> {exc2}"
                 ) from exc2
 
     try:
