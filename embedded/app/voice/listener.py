@@ -6,7 +6,7 @@ import queue
 import threading
 import time
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Union
 from loguru import logger
 
 from app.voice.recognizer import VoiceRecognizer, map_utterance_to_intent
@@ -30,7 +30,7 @@ except Exception:  # pragma: no cover
 @dataclass
 class ListenerConfig:
     base_url: str = "http://127.0.0.1:8000"
-    device: Optional[int] = None
+    device: Optional[Union[int, str]] = None
     rate: int = 16000
     blocksize: int = 8000
     silence_window: float = 1.0
@@ -71,18 +71,15 @@ class VoiceIntentListener:
             # Default to device index 3 as requested
             logger.info("VOICE_LISTENER_DEVICE no configurado; usando device=3 por defecto")
             self.config.device = 3
-        try:
-            self._device_index = int(self.config.device)
-        except Exception:
-            logger.error("VOICE_LISTENER_DEVICE debe ser un indice entero valido (ej. 2)")
-            return
+        # Resolver dispositivo: aceptar indice (int) o nombre/substring (str)
+        self._device = self._resolve_device(self.config.device)
         # No consultamos ni cambiamos de dispositivo; queda fijo
         self._audio_queue = queue.Queue()
         self._refresh_session_flag()
         self._stop_event.clear()
         self._thread = threading.Thread(target=self._run, name="VoiceIntentListener", daemon=True)
         self._thread.start()
-        logger.info("Voice intent listener iniciado (device={} rate={})", self._device_index, self.config.rate)
+        logger.info("Voice intent listener iniciado (device={} rate={})", self._device, self.config.rate)
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -157,7 +154,7 @@ class VoiceIntentListener:
             stream = sd.RawInputStream(
                 samplerate=self.config.rate,
                 blocksize=self.config.blocksize,
-                device=self._device_index,
+                device=self._device,
                 dtype="int16",
                 channels=1,
                 callback=self._audio_callback,
@@ -166,7 +163,7 @@ class VoiceIntentListener:
             block_seconds = self.config.blocksize / float(self.config.rate)
             buffer_since_speech = 0.0
         except Exception as exc:  # pragma: no cover
-            logger.error("No se pudo abrir stream de audio (device={}): {}", self._device_index, exc)
+            logger.error("No se pudo abrir stream de audio (device={}): {}", self._device, exc)
             return
 
         try:
@@ -203,6 +200,46 @@ class VoiceIntentListener:
                     stream.close()
             except Exception:
                 pass
+
+    def _resolve_device(self, spec: Optional[Union[int, str]]) -> Union[int, str]:
+        if spec is None:
+            return 3
+        # If already an int, return as-is
+        if isinstance(spec, int):
+            try:
+                info = sd.query_devices(spec)
+                logger.info("Audio device (index) resuelto: index={} name='{}'", spec, info.get("name"))
+            except Exception:
+                logger.info("Audio device (index)={} (no se pudo consultar info)", spec)
+            return spec
+        # If it's a string that is numeric, try int
+        try:
+            idx = int(str(spec).strip())
+            info = sd.query_devices(idx)
+            logger.info("Audio device (string->index) resuelto: index={} name='{}'", idx, info.get("name"))
+            return idx
+        except Exception:
+            pass
+        name = str(spec).strip()
+        try:
+            devices = sd.query_devices()
+            # Prefer exact match
+            for i, d in enumerate(devices):
+                if str(d.get("name") or "") == name:
+                    logger.info("Audio device (nombre exacto) resuelto: index={} name='{}'", i, name)
+                    return i
+            # Fallback: substring case-insensitive
+            low = name.lower()
+            for i, d in enumerate(devices):
+                dname = str(d.get("name") or "")
+                if low in dname.lower():
+                    logger.info("Audio device (substring) resuelto: index={} name='{}' (desde '{}')", i, dname, name)
+                    return i
+            logger.warning("No se encontro device por nombre '{}'; usando especificacion literal", name)
+            return name
+        except Exception as exc:
+            logger.warning("No se pudo resolver dispositivo '{}': {}", name, exc)
+            return name
 
     # --- session helpers ------------------------------------------------
 
