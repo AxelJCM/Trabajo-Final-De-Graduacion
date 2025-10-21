@@ -44,7 +44,13 @@ INTENT_ACTIONS: Dict[str, Tuple[str, str, Optional[dict]]] = {
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Real-time voice listener")
-    parser.add_argument("--device", type=int, default=DEFAULT_DEVICE, help="Input device index (sounddevice)")
+    # Accept index or name for --device to support stable name-based selection via env/CLI
+    parser.add_argument(
+        "--device",
+        type=str,
+        default=str(DEFAULT_DEVICE),
+        help="Input device (index or exact/substr name). Example: 3 or 'USB 2.0 Camera: Audio (hw:4,0)'",
+    )
     parser.add_argument(
         "--device-spec",
         type=str,
@@ -117,37 +123,43 @@ def main() -> None:
 
     print("[VOICE] Listening... (Ctrl+C to exit)")
 
-    if args.device is None:
-        args.device = DEFAULT_DEVICE
-        print(f"[VOICE] Usando device por defecto: {args.device}")
-
     # Resolve device by name or index
-    def resolve_device(spec: Optional[str], fallback_index: int) -> int:
-        if spec is None or not str(spec).strip():
-            return fallback_index
-        s = str(spec).strip()
-        # Numeric string -> index
-        try:
-            return int(s)
-        except Exception:
-            pass
-        try:
-            devs = sd.query_devices()
-            # exact match first
-            for i, d in enumerate(devs):
-                if str(d.get("name") or "") == s:
-                    return i
-            # substring match
-            low = s.lower()
-            for i, d in enumerate(devs):
-                name = str(d.get("name") or "")
-                if low in name.lower():
-                    return i
-        except Exception:
-            pass
-        return fallback_index
+    def resolve_device(priority_spec: Optional[str], fallback_spec: Optional[str], default_index: int) -> int:
+        # Try a provided spec (string) as index or name. Falls back to default_index if nothing matches.
+        def _resolve_one(spec: Optional[str]) -> Optional[int]:
+            if spec is None:
+                return None
+            s = str(spec).strip()
+            if not s:
+                return None
+            # Numeric string -> index
+            try:
+                return int(s)
+            except Exception:
+                pass
+            try:
+                devs = sd.query_devices()
+                # exact match first
+                for i, d in enumerate(devs):
+                    if str(d.get("name") or "") == s:
+                        return i
+                # substring match
+                low = s.lower()
+                for i, d in enumerate(devs):
+                    name = str(d.get("name") or "")
+                    if low in name.lower():
+                        return i
+            except Exception:
+                return None
+            return None
 
-    resolved_device = resolve_device(args.device_spec, args.device)
+        for spec in (priority_spec, fallback_spec):
+            idx = _resolve_one(spec)
+            if idx is not None:
+                return idx
+        return default_index
+
+    resolved_device = resolve_device(args.device_spec, args.device, DEFAULT_DEVICE)
 
     # Log selected device info; do not auto-switch
     try:

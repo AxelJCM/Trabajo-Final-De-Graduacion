@@ -73,7 +73,8 @@ wait_for_api || exit 1
 # Voice listener (best effort; falls back gracefully if deps missing)
 LISTENER_ARGS=("${ROOT_DIR}/scripts/run_voice_listener.py" "--base-url" "${BASE_URL}")
 if [ -n "${VOICE_LISTENER_DEVICE:-}" ]; then
-  LISTENER_ARGS+=("--device" "${VOICE_LISTENER_DEVICE}")
+  # Pass as --device-spec so it can be an index or a name string
+  LISTENER_ARGS+=("--device-spec" "${VOICE_LISTENER_DEVICE}")
 fi
 if [ -n "${VOICE_LISTENER_RATE:-}" ]; then
   LISTENER_ARGS+=("--rate" "${VOICE_LISTENER_RATE}")
