@@ -62,10 +62,16 @@ class HudStyle:
     TIMER_INTERVAL_MS = 80  # ~12.5 Hz
     FONT_FAMILY = "Roboto"
 
-    TOP_FONT = 22
+    TOP_FONT = 24
     SUB_FONT = 20
     CHIP_FONT = 19
     BOTTOM_FONT = 21
+
+    # Accent and semantic colors
+    ACCENT = QtGui.QColor("#00BCD4")  # cyan
+    OK = QtGui.QColor("#4CAF50")     # green
+    WARN = QtGui.QColor("#FFC107")   # amber
+    ERROR = QtGui.QColor("#F44336")  # red
 
     @staticmethod
     def text_primary(alpha: int = 235) -> QtGui.QColor:
@@ -303,8 +309,11 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
         exercise = str(exercise_raw).replace("_", " ").title()
         reps = posture.get("rep_count", 0)
         phase = posture.get("phase_label") or posture.get("phase") or "--"
+        quality = posture.get("quality")
+        fps = (self._latest_metrics.get("fps") if hasattr(self, "_latest_metrics") else None) or posture.get("fps")
 
         font_title = QtGui.QFont(HudStyle.FONT_FAMILY, HudStyle.TOP_FONT)
+        font_title.setBold(True)
         font_body = QtGui.QFont(HudStyle.FONT_FAMILY, HudStyle.SUB_FONT)
 
         painter.setFont(font_title)
@@ -316,17 +325,53 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
             f"Sesión: {status} • {duration}",
         )
 
+        # Right-aligned chips: status + fps
+        chips: List[Tuple[str, Optional[QtGui.QColor]]] = []
+        status_level = status.lower()
+        if status_level == "active":
+            chips.append(("● Activa", HudStyle.OK))
+        elif status_level == "paused":
+            chips.append(("● Pausa", HudStyle.WARN))
+        else:
+            chips.append(("● Inactiva", QtGui.QColor(120, 120, 120, int(255 * 0.55))))
+        if isinstance(fps, (int, float)):
+            chips.append((f"{fps:.1f} FPS", None))
+        self._draw_chip_row(
+            painter,
+            chips,
+            QtCore.QRect(title_rect.right() - 240, title_rect.y() - 2, 240, title_rect.height() + 4),
+            align_right=True,
+            padding_x=10,
+        )
+
         painter.setFont(font_body)
         metrics = painter.fontMetrics()
         y_cursor = title_rect.bottom() + 8
-        lines = [
-            f"Ejercicio: {exercise}",
-            f"Reps: {reps} • Fase: {phase}",
-        ]
+        # Exercise highlighted line
+        painter.setPen(HudStyle.ACCENT)
+        exercise_line = f"Ejercicio: {exercise}"
+        painter.drawText(QtCore.QRect(rect.x() + 16, y_cursor, rect.width() - 32, metrics.height()), QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter, metrics.elidedText(exercise_line, QtCore.Qt.ElideRight, rect.width() - 32))
+        y_cursor += metrics.height() + 4
+
+        painter.setPen(HudStyle.text_secondary())
+        lines = [f"Reps: {reps} • Fase: {phase}"]
         for line in lines:
             line_rect = QtCore.QRect(rect.x() + 16, y_cursor, rect.width() - 32, metrics.height())
             painter.drawText(line_rect, QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter, metrics.elidedText(line, QtCore.Qt.ElideRight, line_rect.width()))
             y_cursor += metrics.height() + 4
+
+        # Quality bar
+        if isinstance(quality, (int, float)):
+            bar_w = int(rect.width() * 0.50)
+            bar_h = max(12, metrics.height() - 4)
+            bar_x = rect.x() + 16
+            bar_y = y_cursor + 4
+            bar_rect = QtCore.QRect(bar_x, bar_y, bar_w, bar_h)
+            self._draw_quality_bar(painter, bar_rect, float(quality))
+            # Label to the right
+            q_label = f"Calidad {quality:.0f}%"
+            painter.setPen(HudStyle.text_secondary())
+            painter.drawText(QtCore.QRect(bar_rect.right() + 10, bar_rect.y() - 2, rect.width() - bar_rect.right() - 26, bar_h + 6), QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter, q_label)
 
     # --------------------------------------------------------------- draw bottom
 
@@ -380,6 +425,29 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
 
         if self.debug and status == "active":
             self._draw_debug_metrics(painter, rect)
+
+    def _draw_quality_bar(self, painter: QtGui.QPainter, rect: QtCore.QRect, value: float) -> None:
+        painter.save()
+        # Background
+        bg = QtGui.QColor(255, 255, 255)
+        bg.setAlpha(int(255 * 0.18))
+        painter.setPen(QtCore.Qt.NoPen)
+        painter.setBrush(bg)
+        radius = rect.height() // 2
+        painter.drawRoundedRect(rect, radius, radius)
+
+        # Foreground gradient from red -> yellow -> green
+        pct = max(0.0, min(100.0, value)) / 100.0
+        fill_w = int(rect.width() * pct)
+        if fill_w > 0:
+            fill_rect = QtCore.QRect(rect.x(), rect.y(), fill_w, rect.height())
+            grad = QtGui.QLinearGradient(fill_rect.topLeft(), fill_rect.topRight())
+            grad.setColorAt(0.0, HudStyle.ERROR)
+            grad.setColorAt(0.5, HudStyle.WARN)
+            grad.setColorAt(1.0, HudStyle.OK)
+            painter.setBrush(grad)
+            painter.drawRoundedRect(fill_rect, radius, radius)
+        painter.restore()
 
     def _draw_debug_metrics(self, painter: QtGui.QPainter, rect: QtCore.QRect) -> None:
         if not self.debug or not self._latest_metrics:
