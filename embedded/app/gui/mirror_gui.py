@@ -66,6 +66,7 @@ class HudStyle:
     SUB_FONT = 20
     CHIP_FONT = 19
     BOTTOM_FONT = 21
+    TOAST_FONT = 22
 
     # Accent and semantic colors
     ACCENT = QtGui.QColor("#00BCD4")  # cyan
@@ -391,37 +392,66 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
     def _draw_bottom_panel(self, painter: QtGui.QPainter, rect: QtCore.QRect) -> None:
         self._draw_panel(painter, rect, radius=14)
         session = self.state.session or {}
+        biometrics = self.state.biometrics or {}
         status = (session.get("status") or "idle").lower()
         active_duration = session.get("duration_active_sec")
-        time_text = f"Tiempo activo: {_fmt_duration(active_duration)}" if status == "active" else "Sesión inactiva"
 
-        font_left = QtGui.QFont(HudStyle.FONT_FAMILY, HudStyle.BOTTOM_FONT)
-        painter.setFont(font_left)
-        metrics_left = painter.fontMetrics()
+        # Left: show active time only if active (remove "Sesión inactiva")
         left_rect = QtCore.QRect(rect.x() + 18, rect.y(), rect.width() // 3, rect.height())
-        painter.setPen(HudStyle.text_primary())
-        painter.drawText(left_rect, QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft, metrics_left.elidedText(time_text, QtCore.Qt.ElideRight, left_rect.width()))
+        if status == "active":
+            font_left = QtGui.QFont(HudStyle.FONT_FAMILY, HudStyle.BOTTOM_FONT)
+            painter.setFont(font_left)
+            painter.setPen(HudStyle.text_primary())
+            time_text = f"Tiempo activo: {_fmt_duration(active_duration)}"
+            painter.drawText(left_rect, QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft, time_text)
 
+        # Center: HR and Steps as visual chips with icons
         font_info = QtGui.QFont(HudStyle.FONT_FAMILY, HudStyle.SUB_FONT)
         painter.setFont(font_info)
-        metrics_info = painter.fontMetrics()
-        hr_line, steps_line, chip = self._build_biometrics()
-        info_rect = QtCore.QRect(rect.x() + rect.width() // 3 + 8, rect.y(), rect.width() // 3, rect.height())
-        painter.drawText(
-            info_rect,
-            QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter,
-            metrics_info.elidedText(hr_line, QtCore.Qt.ElideRight, info_rect.width()),
-        )
-        painter.drawText(
-            info_rect,
-            QtCore.Qt.AlignLeft | QtCore.Qt.AlignBottom,
-            metrics_info.elidedText(steps_line, QtCore.Qt.ElideRight, info_rect.width()),
+        hr = biometrics.get("heart_rate_bpm")
+        steps = biometrics.get("steps")
+        info_rect = QtCore.QRect(rect.x() + rect.width() // 3 + 8, rect.y(), rect.width() // 3 + 40, rect.height())
+        # Build two chips side-by-side
+        chip_h = max(28, int(rect.height() * 0.55))
+        y_chip = info_rect.y() + (info_rect.height() - chip_h) // 2
+        x_cursor = info_rect.x() + 8
+
+        # Heart rate chip
+        hr_text = f"{hr} bpm" if hr is not None else "-- bpm"
+        x_cursor = self._draw_metric_chip(
+            painter,
+            x_cursor,
+            y_chip,
+            height=chip_h,
+            text=hr_text,
+            bg_color=HudStyle.OK if isinstance(hr, int) and hr > 0 else QtGui.QColor(0, 0, 0, int(255 * HudStyle.CHIP_OPACITY)),
+            icon_kind="heart",
+        ) + 10
+
+        # Steps chip
+        steps_text = f"{steps}" if steps is not None else "--"
+        _ = self._draw_metric_chip(
+            painter,
+            x_cursor,
+            y_chip,
+            height=chip_h,
+            text=f"Pasos {steps_text}",
+            bg_color=QtGui.QColor(0, 0, 0, int(255 * HudStyle.CHIP_OPACITY)),
+            icon_kind="steps",
         )
 
-        chip_width = metrics_info.horizontalAdvance(chip[0]) + 26
-        chip_height = max(26, int(rect.height() * 0.55))
+        # Right: Fitbit chip with dots icon and level color
+        level = biometrics.get("fitbit_status_level", "yellow")
+        chip_color = HudStyle.fitbit_chip(level)
+        chip_color.setAlpha(int(255 * HudStyle.CHIP_OPACITY))
+        fitbit_text = "Fitbit"
+        metrics_info = painter.fontMetrics()
+        chip_width = metrics_info.horizontalAdvance(fitbit_text) + 36  # extra for dots
+        chip_height = chip_h
         chip_rect = QtCore.QRect(rect.right() - chip_width - 18, rect.y() + (rect.height() - chip_height) // 2, chip_width, chip_height)
-        self._draw_chip_box(painter, chip_rect, chip[0], chip[1])
+        self._draw_chip_box(painter, chip_rect, fitbit_text, chip_color)
+        # Draw 2x2 dots as minimal Fitbit mark inside the chip (left side)
+        self._draw_fitbit_dots(painter, QtCore.QRect(chip_rect.x() + 10, chip_rect.y() + 8, 14, chip_rect.height() - 16), QtGui.QColor(255, 255, 255, 210))
 
         if self.debug and status == "active":
             self._draw_debug_metrics(painter, rect)
@@ -472,7 +502,7 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
 
     def _draw_session_summary(self, painter: QtGui.QPainter) -> None:
         summary = self._session_summary or {}
-        lines: List[str] = ["Resumen de la sesion"]
+        lines: List[str] = ["Resumen de la sesion:"]
         duration = summary.get("duration_sec")
         if isinstance(duration, int):
             lines.append(f"Duracion: {_fmt_duration(duration)}")
@@ -517,13 +547,15 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
         if not self._toast_message:
             return
         painter.save()
-        font = QtGui.QFont(HudStyle.FONT_FAMILY, 13)
+        font = QtGui.QFont(HudStyle.FONT_FAMILY, HudStyle.TOAST_FONT)
         painter.setFont(font)
         metrics = painter.fontMetrics()
-        width = metrics.horizontalAdvance(self._toast_message) + 40
-        height = metrics.height() + 14
+        width = metrics.horizontalAdvance(self._toast_message) + 64
+        height = metrics.height() + 20
         rect = QtCore.QRect((self.width() - width) // 2, bottom_rect.top() - height - 12, width, height)
-        self._draw_chip_box(painter, rect, self._toast_message, QtGui.QColor(0, 0, 0, int(255 * HudStyle.CHIP_OPACITY)))
+        # Slightly more opaque for readability
+        bg = QtGui.QColor(0, 0, 0, int(255 * max(HudStyle.CHIP_OPACITY, 0.65)))
+        self._draw_chip_box(painter, rect, self._toast_message, bg)
         painter.restore()
 
     # ------------------------------------------------------------- chip utils
@@ -619,6 +651,86 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
         painter.drawRoundedRect(rect, radius, radius)
         painter.setPen(text_color or HudStyle.text_primary())
         painter.drawText(rect, QtCore.Qt.AlignCenter, text)
+        painter.restore()
+
+    def _draw_metric_chip(
+        self,
+        painter: QtGui.QPainter,
+        x: int,
+        y: int,
+        *,
+        height: int,
+        text: str,
+        bg_color: QtGui.QColor,
+        icon_kind: str,
+    ) -> int:
+        metrics = painter.fontMetrics()
+        text_w = metrics.horizontalAdvance(text)
+        padding_x = 14
+        icon_w = 18
+        width = padding_x * 2 + icon_w + 8 + text_w
+        rect = QtCore.QRect(x, y, width, height)
+        self._draw_chip_box(painter, rect, "", bg_color)
+        # Draw icon
+        icon_rect = QtCore.QRect(rect.x() + padding_x, rect.y() + (rect.height() - icon_w) // 2, icon_w, icon_w)
+        if icon_kind == "heart":
+            self._draw_icon_heart(painter, icon_rect, QtGui.QColor(255, 255, 255))
+        elif icon_kind == "steps":
+            self._draw_icon_steps(painter, icon_rect, QtGui.QColor(255, 255, 255))
+        # Draw text right to icon
+        text_rect = QtCore.QRect(icon_rect.right() + 8, rect.y(), rect.width() - (icon_rect.right() - rect.x()) - 12, rect.height())
+        painter.save()
+        painter.setPen(HudStyle.text_primary())
+        painter.drawText(text_rect, QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft, text)
+        painter.restore()
+        return rect.right()
+
+    def _draw_icon_heart(self, painter: QtGui.QPainter, rect: QtCore.QRect, color: QtGui.QColor) -> None:
+        painter.save()
+        painter.setRenderHint(QtGui.QPainter.Antialiasing)
+        painter.setPen(QtCore.Qt.NoPen)
+        painter.setBrush(color)
+        path = QtGui.QPainterPath()
+        x, y, w, h = rect.x(), rect.y(), rect.width(), rect.height()
+        r = w / 4.0
+        path.addEllipse(QtCore.QRectF(x + r * 0.5, y, r * 2, r * 2))
+        path.addEllipse(QtCore.QRectF(x + r * 1.5, y, r * 2, r * 2))
+        poly = QtGui.QPolygonF([
+            QtCore.QPointF(x + w * 0.10, y + h * 0.35),
+            QtCore.QPointF(x + w * 0.50, y + h * 0.95),
+            QtCore.QPointF(x + w * 0.90, y + h * 0.35),
+        ])
+        path.addPolygon(poly)
+        painter.drawPath(path)
+        painter.restore()
+
+    def _draw_icon_steps(self, painter: QtGui.QPainter, rect: QtCore.QRect, color: QtGui.QColor) -> None:
+        painter.save()
+        painter.setRenderHint(QtGui.QPainter.Antialiasing)
+        painter.setPen(QtCore.Qt.NoPen)
+        painter.setBrush(color)
+        # Two simple foot shapes (ellipses)
+        w, h = rect.width(), rect.height()
+        left = QtCore.QRect(rect.x(), rect.y() + h // 4, w // 2, h // 2)
+        right = QtCore.QRect(rect.x() + w // 2, rect.y(), w // 2, h // 2)
+        painter.drawEllipse(left)
+        painter.drawEllipse(right)
+        painter.restore()
+
+    def _draw_fitbit_dots(self, painter: QtGui.QPainter, rect: QtCore.QRect, color: QtGui.QColor) -> None:
+        painter.save()
+        painter.setRenderHint(QtGui.QPainter.Antialiasing)
+        painter.setPen(QtCore.Qt.NoPen)
+        painter.setBrush(color)
+        w, h = rect.width(), rect.height()
+        r = max(2, min(w, h) // 5)
+        gap_x = (w - 2 * r) // 3
+        gap_y = (h - 2 * r) // 3
+        cx = rect.x() + gap_x
+        cy = rect.y() + gap_y
+        for i in range(2):
+            for j in range(2):
+                painter.drawEllipse(QtCore.QRect(cx + i * (r + gap_x), cy + j * (r + gap_y), r, r))
         painter.restore()
 
     # --------------------------------------------------------------- CLI mode
