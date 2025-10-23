@@ -16,6 +16,8 @@ Thumbs.db
 # Logs
 logs/
 *.log
+# Embedded app logs
+embedded/app/data/logs/
 # Fitbit prototype tokens
 fitbit_prototype/tokens.json
 # Byte-compiled / optimized / DLL files
@@ -163,6 +165,15 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+
+# Training artifacts and local recordings
+embedded/app/data/training/voice/
+embedded/app/data/training/pose/
+embedded/app/data/models/*.joblib
+recordings/
+
+# Local OAuth tokens (prototype)
+embedded/app/biometrics/tokens.json
 
 # Spyder project settings
 .spyderproject
