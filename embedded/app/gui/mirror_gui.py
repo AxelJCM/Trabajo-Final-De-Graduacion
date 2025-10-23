@@ -705,16 +705,32 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
         painter.restore()
 
     def _draw_icon_steps(self, painter: QtGui.QPainter, rect: QtCore.QRect, color: QtGui.QColor) -> None:
+        """Draw two small shoe-sole prints (diagonal), to represent steps."""
         painter.save()
         painter.setRenderHint(QtGui.QPainter.Antialiasing)
         painter.setPen(QtCore.Qt.NoPen)
         painter.setBrush(color)
-        # Two simple foot shapes (ellipses)
-        w, h = rect.width(), rect.height()
-        left = QtCore.QRect(rect.x(), rect.y() + h // 4, w // 2, h // 2)
-        right = QtCore.QRect(rect.x() + w // 2, rect.y(), w // 2, h // 2)
-        painter.drawEllipse(left)
-        painter.drawEllipse(right)
+        w, h = float(rect.width()), float(rect.height())
+        cx1, cy1 = rect.x() + w * 0.35, rect.y() + h * 0.65
+        cx2, cy2 = rect.x() + w * 0.68, rect.y() + h * 0.32
+        sole_w1, sole_h1 = w * 0.40, h * 0.62
+        sole_w2, sole_h2 = w * 0.34, h * 0.52
+        radius = max(2.0, min(sole_w1, sole_h1) * 0.25)
+
+        # First footprint (lower-left), rotated slightly counter-clockwise
+        painter.save()
+        painter.translate(cx1, cy1)
+        painter.rotate(-25)
+        painter.drawRoundedRect(QtCore.QRectF(-sole_w1 / 2, -sole_h1 / 2, sole_w1, sole_h1), radius, radius)
+        painter.restore()
+
+        # Second footprint (upper-right), rotated slightly clockwise
+        painter.save()
+        painter.translate(cx2, cy2)
+        painter.rotate(18)
+        painter.drawRoundedRect(QtCore.QRectF(-sole_w2 / 2, -sole_h2 / 2, sole_w2, sole_h2), radius * 0.9, radius * 0.9)
+        painter.restore()
+
         painter.restore()
 
     def _draw_fitbit_dots(self, painter: QtGui.QPainter, rect: QtCore.QRect, color: QtGui.QColor) -> None:

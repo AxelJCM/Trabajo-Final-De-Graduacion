@@ -139,14 +139,24 @@ class PoseEstimator:
         fps = self._update_fps()
         latency_p50, latency_p95 = self._latency_percentiles()
 
-        quality = self._compute_quality(angles)
-        self._quality_window.append(quality)
-        self._quality_sum += quality
-        self._quality_count += 1
-        avg_quality = self.get_average_quality()
+        # Gate quality and rep counting by session activity (counting_enabled)
+        # - When not active/paused, don't count reps and don't accumulate quality metrics.
+        if self.counting_enabled:
+            quality = self._compute_quality(angles)
+            self._quality_window.append(quality)
+            self._quality_sum += quality
+            self._quality_count += 1
+            avg_quality = self.get_average_quality()
+            self._update_reps(angles)
+            feedback_code, feedback = self._feedback_for_angles(angles, quality)
+        else:
+            quality = 0.0
+            # Do not change accumulated average while inactive/paused
+            avg_quality = self.get_average_quality()
+            # Still update phase transitions internally but do not increment reps
+            self._update_reps(angles)
+            feedback_code, feedback = "idle", "Listo para empezar"
 
-        self._update_reps(angles)
-        feedback_code, feedback = self._feedback_for_angles(angles, quality)
         self.feedback_code = feedback_code
         self.feedback = feedback
 
