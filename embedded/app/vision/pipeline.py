@@ -230,6 +230,15 @@ class PoseEstimator:
     def get_phase_label(self) -> str:
         return self._SPANISH_PHASE.get(self.phase, self.phase.title())
 
+    # --- Debug accessors (used by /debug endpoints) --------------------
+    @property
+    def cap(self):  # pragma: no cover - debug tooling
+        return self._cap
+
+    @property
+    def pose(self):  # pragma: no cover - debug tooling
+        return self._pose
+
     # --- Internal helpers -----------------------------------------------
 
     def _init_realtime_pipeline(self) -> None:  # pragma: no cover - hardware path
