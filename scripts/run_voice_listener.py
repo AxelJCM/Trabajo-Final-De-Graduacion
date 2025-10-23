@@ -32,7 +32,7 @@ except Exception as exc:  # pragma: no cover
     sys.exit(1)
 
 DEFAULT_RATE = 16000
-DEFAULT_DEVICE = 3
+DEFAULT_DEVICE = 2
 
 # Exercise cycling state and mapping for intents
 EXERCISE_CYCLE = ["squat", "pushup", "crunch"]
@@ -199,6 +199,7 @@ def main() -> None:
 
     # Prefer using the provided device name string verbatim to avoid index drift
     if args.device_spec and str(args.device_spec).strip():
+        print("[VOICE] Using --device-spec; --device (index) will be ignored")
         device_param = str(args.device_spec).strip()
         # Best-effort to find its index for logging
         try:
