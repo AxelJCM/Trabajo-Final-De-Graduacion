@@ -208,6 +208,8 @@ def session_stop(request: Request, db: Session = Depends(get_db)) -> Envelope:
         "duration_active_sec": duration_active,
         "total_reps": total_reps,
         "rep_breakdown": rep_breakdown,
+        # Include quality average in the session summary for GUI consumption
+        "avg_quality": avg_quality,
     }
 
     pose_estimator.reset_session(exercise=_state.get("exercise"), preserve_totals=False)

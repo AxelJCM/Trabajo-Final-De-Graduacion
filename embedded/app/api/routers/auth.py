@@ -94,7 +94,7 @@ def fitbit_login(request: Request, redirect: str | None = None, auth_mode: str |
 
 
 @router.get("/auth/fitbit/callback")
-def fitbit_callback(code: str, state: str | None = None, db: Session = Depends(get_db)):
+def fitbit_callback(code: str, state: str | None = None, request: Request = None, db: Session = Depends(get_db)):
     s = get_settings()
     token_url = "https://api.fitbit.com/oauth2/token"
     # Sanitize env values to avoid stray quotes/whitespace issues from .env
@@ -206,6 +206,21 @@ def fitbit_callback(code: str, state: str | None = None, db: Session = Depends(g
             token_type=payload.get("token_type"),
         )
         logger.info("Fitbit tokens saved")
+        # Auto-start polling loop in production once tokens are stored
+        try:
+            app = request.app if request is not None else None
+            if app is not None and not getattr(app.state, "_fitbit_task", None):
+                from app.biometrics.fitbit_client import FitbitClient
+                import asyncio as _asyncio
+                stop_event = _asyncio.Event()
+                client = FitbitClient()
+                task = _asyncio.create_task(client.polling_loop(stop_event))
+                app.state._fitbit_task = task
+                app.state._fitbit_stop = stop_event
+                app.state.fitbit_client = client
+                logger.info("Fitbit polling started after OAuth callback")
+        except Exception as exc:  # pragma: no cover
+            logger.warning("Failed to start Fitbit polling after callback: {}", exc)
         # Redirect to a friendly page instead of raw JSON
         return RedirectResponse(url="/debug/view?fitbit=connected", status_code=302)
     except Exception as exc:  # pragma: no cover

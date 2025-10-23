@@ -509,6 +509,9 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
         active = summary.get("duration_active_sec")
         if isinstance(active, int):
             lines.append(f"Activo: {_fmt_duration(active)}")
+        avg_q = summary.get("avg_quality")
+        if isinstance(avg_q, (int, float)):
+            lines.append(f"Calidad promedio: {avg_q:.0f}%")
         total_reps = summary.get("total_reps")
         lines.append(f"Reps totales: {total_reps if isinstance(total_reps, int) else 0}")
         rep_breakdown = summary.get("rep_breakdown") or {}

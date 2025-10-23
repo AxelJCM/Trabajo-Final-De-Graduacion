@@ -38,7 +38,7 @@ python -m app.gui.mirror_gui --cli --base-url http://127.0.0.1:8000
 - `POST /posture` → FPS, latencias p50/p95, rep_totals, fase y feedback granular.
 - `POST /biometrics` / `GET /biometrics/last` → FC, pasos, zona (`zone_color`), estado Fitbit y `staleness_sec`.
 - `POST /session/start|pause|stop|exercise` → control de sesión.
-- `GET /session/status` → datos vivos: `status`, `last_command`, `duration_active_sec`, `rep_totals`, `feedback`.
+- `GET /session/status` → datos vivos: `status`, `last_command`, `duration_active_sec`, `rep_totals`, `feedback`. Al finalizar una sesión, `session_summary` incluye `duration_sec`, `duration_active_sec`, `total_reps`, `rep_breakdown` y `avg_quality`.
 - `GET /session/last` y `GET /session/history?limit=N` → histórico persistido en SQLite con `avg_hr`, `max_hr`, `total_reps`, `avg_quality`.
 
 Todas las respuestas siguen la forma `{ "success": bool, "data": ..., "error": str|None }`.
