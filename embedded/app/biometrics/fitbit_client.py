@@ -70,6 +70,8 @@ class FitbitClient:
         self._last_metrics: Optional[Metrics] = None
         self._last_error: Optional[str] = None
         self._history: deque[Metrics] = deque(maxlen=512)
+        # Throttle steps fetches to reduce API usage; HR can be more frequent
+        self._last_steps_fetch: Optional[datetime] = None
 
         if not access_token:
             db = SessionLocal()
@@ -488,6 +490,15 @@ class FitbitClient:
         """
         if httpx is None or not self.access_token:
             return 0, "mock"
+        # Throttle according to settings
+        try:
+            interval = max(10, int(self.settings.fitbit_steps_poll_interval))
+        except Exception:
+            interval = 60
+        now = datetime.now(timezone.utc)
+        if self._last_steps_fetch and (now - self._last_steps_fetch).total_seconds() < interval:
+            cached = self.get_cached_steps()
+            return (cached if cached is not None else 0), "cached"
         url = "https://api.fitbit.com/1/user/-/activities/steps/date/today/1d.json"
         try:
             async with httpx.AsyncClient(timeout=10) as client:
@@ -498,20 +509,26 @@ class FitbitClient:
                     r = await client.get(url, headers=new_headers)
                 if r.status_code >= 400:
                     logger.warning("Steps fetch failed: {} {}", r.status_code, r.text[:200])
-                    return self.get_cached_steps() or 0, "cached"
+                    cached = self.get_cached_steps()
+                    return (cached if cached is not None else 0), "cached"
                 body = r.json()
                 # body["activities-steps"] -> list of {dateTime, value}
                 arr = body.get("activities-steps") if isinstance(body, dict) else None
                 if isinstance(arr, list) and arr:
                     try:
-                        return int(arr[-1].get("value", 0)), "daily"
+                        steps_val = int(arr[-1].get("value", 0))
+                        self._last_steps_fetch = now
+                        return steps_val, "daily"
                     except Exception:
-                        return self.get_cached_steps() or 0, "cached"
-                return self.get_cached_steps() or 0, "cached"
+                        cached = self.get_cached_steps()
+                        return (cached if cached is not None else 0), "cached"
+                cached = self.get_cached_steps()
+                return (cached if cached is not None else 0), "cached"
         except Exception as exc:
             logger.warning("Steps fetch exception: {}", exc)
             self._last_error = str(exc)
-            return self.get_cached_steps() or 0, "cached"
+            cached = self.get_cached_steps()
+            return (cached if cached is not None else 0), "cached"
 
     async def polling_loop(self, stop_event: asyncio.Event):
         interval = int(self.settings.fitbit_poll_interval)

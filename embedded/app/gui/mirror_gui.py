@@ -4,9 +4,12 @@ from __future__ import annotations
 import argparse
 import asyncio
 import time
+import os
+import webbrowser
+import urllib.parse
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 try:
     from PyQt5 import QtCore, QtGui, QtWidgets  # type: ignore
@@ -14,6 +17,11 @@ except Exception:  # pragma: no cover
     QtWidgets = None  # type: ignore
     QtGui = None  # type: ignore
     QtCore = None  # type: ignore
+
+# Provide placeholder Qt types to satisfy type checkers without requiring PyQt stubs
+# These are only used in annotations (stringified via from __future__ import annotations)
+QColor = QPixmap = QPainter = QImage = QPainterPath = object  # type: ignore
+QRect = QRectF = QPointF = Qt = QByteArray = object  # type: ignore
 
 try:
     import requests
@@ -75,19 +83,19 @@ class HudStyle:
     ERROR = QtGui.QColor("#F44336")  # red
 
     @staticmethod
-    def text_primary(alpha: int = 235) -> QtGui.QColor:
+    def text_primary(alpha: int = 235) -> "QColor":
         color = QtGui.QColor(255, 255, 255)
         color.setAlpha(alpha)
         return color
 
     @staticmethod
-    def text_secondary(alpha: int = 200) -> QtGui.QColor:
+    def text_secondary(alpha: int = 200) -> "QColor":
         color = QtGui.QColor(255, 255, 255)
         color.setAlpha(alpha)
         return color
 
     @staticmethod
-    def fitbit_chip(level: str) -> QtGui.QColor:
+    def fitbit_chip(level: str) -> "QColor":
         palette = {
             "green": QtGui.QColor("#4CAF50"),
             "yellow": QtGui.QColor("#FFC107"),
@@ -105,7 +113,7 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
         self.debug = debug
         self.state = HudState({}, {}, {})
         self.last_error: Optional[str] = None
-        self.frame_pixmap: Optional[QtGui.QPixmap] = None
+        self.frame_pixmap: Optional["QPixmap"] = None
         self._client = requests.Session() if requests else None
         self._tick = 0
         self._session_interval = HudStyle.ACTIVE_INTERVAL
@@ -118,6 +126,10 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
         self._session_summary: Optional[Dict[str, Any]] = None
         self._requires_start: bool = True
         self._last_voice_seq: int = 0
+        # Auto-login to Fitbit once per run if tokens are missing
+        self._fitbit_autologin_attempted: bool = False
+        # Track last Fitbit connectivity level to notify on changes
+        self._last_fitbit_level: Optional[str] = None
 
         self.setWindowTitle("TFG Smart Mirror HUD")
         self.setCursor(QtCore.Qt.BlankCursor)
@@ -227,10 +239,76 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
             resp = self._client.get(f"{self.base_url}/biometrics/last", timeout=1.2)
             if resp.ok:
                 self.state.biometrics = resp.json().get("data", {})
+                # Notify if Fitbit connectivity level changes (green/yellow/red)
+                try:
+                    biom = self.state.biometrics or {}
+                    level = str(biom.get("fitbit_status_level") or "").lower()
+                    msg = biom.get("fitbit_status_message") or biom.get("error")
+                    if level in {"green", "yellow", "red"}:
+                        if level != self._last_fitbit_level:
+                            if level == "green":
+                                self._toast_message = "Fitbit conectado"
+                            elif level == "yellow":
+                                self._toast_message = "Fitbit sincronizando…"
+                            else:
+                                self._toast_message = f"Fitbit desconectado{(': ' + str(msg)) if msg else ''}"
+                            self._toast_until = time.time() + max(2.5, HudStyle.TOAST_DURATION)
+                            self._last_fitbit_level = level
+                except Exception:
+                    pass
         except Exception as exc:  # pragma: no cover
             self.last_error = f"biometrics: {exc}"
         status = (self.state.session or {}).get("status", "idle")
         self._session_interval = HudStyle.ACTIVE_INTERVAL if status == "active" else HudStyle.IDLE_INTERVAL
+        # Try to auto-init Fitbit OAuth once in the background if not connected
+        try:
+            self._maybe_autologin_fitbit()
+        except Exception:
+            pass
+
+    def _maybe_autologin_fitbit(self) -> None:
+        """If tokens are missing and auto-login is enabled, open Fitbit login URL once.
+
+        This triggers the backend's /auth/fitbit/login with an appropriate redirect so the
+        user can complete OAuth in the system browser while the GUI sigue funcionando.
+        """
+        if self._fitbit_autologin_attempted:
+            return
+        if not self._client:
+            return
+        # Allow disabling via env FITBIT_AUTO_LOGIN=0
+        if os.getenv("FITBIT_AUTO_LOGIN", "1").lower() in {"0", "false", "off", "no"}:
+            self._fitbit_autologin_attempted = True
+            return
+        try:
+            st = self._client.get(f"{self.base_url}/auth/fitbit/status", timeout=1.2)
+            if st.ok and isinstance(st.json(), dict) and st.json().get("connected"):
+                self._fitbit_autologin_attempted = True
+                return
+        except Exception:
+            # If status is unreachable, don't loop here
+            return
+        # Not connected: build login URL with a sane redirect
+        redirect_uri = None
+        try:
+            dbg = self._client.get(f"{self.base_url}/auth/fitbit/debug-config", timeout=1.2)
+            if dbg.ok:
+                redirect_uri = (dbg.json() or {}).get("redirect_uri")
+        except Exception:
+            redirect_uri = None
+        if not redirect_uri:
+            redirect_uri = f"{self.base_url}/auth/fitbit/callback"
+        qs = urllib.parse.urlencode({"redirect": redirect_uri})
+        login_url = f"{self.base_url}/auth/fitbit/login?{qs}"
+        # Show a subtle toast and attempt to open system browser without raising window
+        self._toast_message = "Conectando Fitbit…"
+        self._toast_until = time.time() + max(3.0, HudStyle.TOAST_DURATION)
+        try:
+            webbrowser.open(login_url, new=0, autoraise=False)
+        except Exception:
+            pass
+        finally:
+            self._fitbit_autologin_attempted = True
 
     def _fetch_posture(self) -> None:
         if not self._client:
@@ -290,7 +368,7 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
 
     # -------------------------------------------------------------- draw top --
 
-    def _draw_panel(self, painter: QtGui.QPainter, rect: QtCore.QRect, radius: int) -> None:
+    def _draw_panel(self, painter: "QPainter", rect: "QRect", radius: int) -> None:
         painter.save()
         bg = QtGui.QColor(0, 0, 0)
         bg.setAlpha(int(255 * HudStyle.BAR_OPACITY))
@@ -299,7 +377,7 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
         painter.drawRoundedRect(rect, radius, radius)
         painter.restore()
 
-    def _draw_top_panel(self, painter: QtGui.QPainter, rect: QtCore.QRect, *, portrait: bool) -> None:
+    def _draw_top_panel(self, painter: "QPainter", rect: "QRect", *, portrait: bool) -> None:
         self._draw_panel(painter, rect, radius=18)
         session = self.state.session or {}
         posture = self.state.posture or {}
@@ -327,7 +405,7 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
         )
 
         # Right-aligned chips: status + fps
-        chips: List[Tuple[str, Optional[QtGui.QColor]]] = []
+        chips: List[Tuple[str, Optional["QColor"]]] = []
         status_level = status.lower()
         if status_level == "active":
             chips.append(("● Activa", HudStyle.OK))
@@ -376,7 +454,7 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
 
     # --------------------------------------------------------------- draw bottom
 
-    def _build_biometrics(self) -> Tuple[str, str, Tuple[str, QtGui.QColor]]:
+    def _build_biometrics(self) -> Tuple[str, str, Tuple[str, "QColor"]]:
         biometrics = self.state.biometrics or {}
         hr = biometrics.get("heart_rate_bpm")
         steps = biometrics.get("steps")
@@ -389,7 +467,7 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
         chip = (f"{icon} Fitbit {level}", chip_color)
         return hr_line, steps_line, chip
 
-    def _draw_bottom_panel(self, painter: QtGui.QPainter, rect: QtCore.QRect) -> None:
+    def _draw_bottom_panel(self, painter: "QPainter", rect: "QRect") -> None:
         self._draw_panel(painter, rect, radius=14)
         session = self.state.session or {}
         biometrics = self.state.biometrics or {}
@@ -456,7 +534,7 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
         if self.debug and status == "active":
             self._draw_debug_metrics(painter, rect)
 
-    def _draw_quality_bar(self, painter: QtGui.QPainter, rect: QtCore.QRect, value: float) -> None:
+    def _draw_quality_bar(self, painter: "QPainter", rect: "QRect", value: float) -> None:
         painter.save()
         # Background
         bg = QtGui.QColor(255, 255, 255)
@@ -479,10 +557,10 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
             painter.drawRoundedRect(fill_rect, radius, radius)
         painter.restore()
 
-    def _draw_debug_metrics(self, painter: QtGui.QPainter, rect: QtCore.QRect) -> None:
+    def _draw_debug_metrics(self, painter: "QPainter", rect: "QRect") -> None:
         if not self.debug or not self._latest_metrics:
             return
-        items: List[Tuple[str, Optional[QtGui.QColor]]] = []
+        items: List[Tuple[str, Optional["QColor"]]] = []
         fps = self._latest_metrics.get("fps")
         p50 = self._latest_metrics.get("latency_p50")
         p95 = self._latest_metrics.get("latency_p95")
@@ -500,7 +578,7 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
         self._draw_chip_row(painter, items, QtCore.QRect(rect.x(), rect.y(), rect.width(), rect.height()), align_right=True, padding_x=8)
         painter.restore()
 
-    def _draw_session_summary(self, painter: QtGui.QPainter) -> None:
+    def _draw_session_summary(self, painter: "QPainter") -> None:
         summary = self._session_summary or {}
         lines: List[str] = ["Resumen de la sesion:"]
         duration = summary.get("duration_sec")
@@ -546,7 +624,7 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
             y += line_height
         painter.restore()
 
-    def _draw_toast(self, painter: QtGui.QPainter, bottom_rect: QtCore.QRect) -> None:
+    def _draw_toast(self, painter: "QPainter", bottom_rect: "QRect") -> None:
         if not self._toast_message:
             return
         painter.save()
@@ -565,9 +643,9 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
 
     def _draw_chip_row(
         self,
-        painter: QtGui.QPainter,
-        chips: List[Tuple[str, Optional[QtGui.QColor]]],
-        rect: QtCore.QRect,
+    painter: "QPainter",
+    chips: List[Tuple[str, Optional["QColor"]]],
+    rect: "QRect",
         *,
         align_right: bool = False,
         padding_x: int = 12,
@@ -608,14 +686,14 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
 
     def _draw_chip(
         self,
-        painter: QtGui.QPainter,
+        painter: "QPainter",
         text: str,
         x_cursor: int,
-        bar_rect: QtCore.QRect,
+        bar_rect: "QRect",
         height: int,
-        text_color: QtGui.QColor,
+        text_color: "QColor",
         *,
-        bg_color: Optional[QtGui.QColor] = None,
+        bg_color: Optional["QColor"] = None,
         padding_x: int = 12,
         width_override: Optional[int] = None,
     ) -> int:
@@ -640,12 +718,12 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
 
     def _draw_chip_box(
         self,
-        painter: QtGui.QPainter,
-        rect: QtCore.QRect,
+        painter: "QPainter",
+        rect: "QRect",
         text: str,
-        bg_color: QtGui.QColor,
+        bg_color: "QColor",
         *,
-        text_color: Optional[QtGui.QColor] = None,
+        text_color: Optional["QColor"] = None,
     ) -> None:
         painter.save()
         painter.setPen(QtCore.Qt.NoPen)
@@ -658,13 +736,13 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
 
     def _draw_metric_chip(
         self,
-        painter: QtGui.QPainter,
+        painter: "QPainter",
         x: int,
         y: int,
         *,
         height: int,
         text: str,
-        bg_color: QtGui.QColor,
+        bg_color: "QColor",
         icon_kind: str,
     ) -> int:
         metrics = painter.fontMetrics()
@@ -688,7 +766,7 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
         painter.restore()
         return rect.right()
 
-    def _draw_icon_heart(self, painter: QtGui.QPainter, rect: QtCore.QRect, color: QtGui.QColor) -> None:
+    def _draw_icon_heart(self, painter: "QPainter", rect: "QRect", color: "QColor") -> None:
         painter.save()
         painter.setRenderHint(QtGui.QPainter.Antialiasing)
         painter.setPen(QtCore.Qt.NoPen)
@@ -707,7 +785,7 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
         painter.drawPath(path)
         painter.restore()
 
-    def _draw_icon_steps(self, painter: QtGui.QPainter, rect: QtCore.QRect, color: QtGui.QColor) -> None:
+    def _draw_icon_steps(self, painter: "QPainter", rect: "QRect", color: "QColor") -> None:
         """Draw two small shoe-sole prints (diagonal), to represent steps."""
         painter.save()
         painter.setRenderHint(QtGui.QPainter.Antialiasing)
@@ -736,7 +814,7 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
 
         painter.restore()
 
-    def _draw_fitbit_dots(self, painter: QtGui.QPainter, rect: QtCore.QRect, color: QtGui.QColor) -> None:
+    def _draw_fitbit_dots(self, painter: "QPainter", rect: "QRect", color: "QColor") -> None:
         painter.save()
         painter.setRenderHint(QtGui.QPainter.Antialiasing)
         painter.setPen(QtCore.Qt.NoPen)

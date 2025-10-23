@@ -65,6 +65,8 @@ class Settings(BaseModel):
 
     # Biometrics / scheduling
     fitbit_poll_interval: int = int(os.getenv("FITBIT_POLL_INTERVAL", "15"))
+    # Separate steps polling interval to avoid excessive calls; HR can be more frequent
+    fitbit_steps_poll_interval: int = int(os.getenv("FITBIT_STEPS_POLL_INTERVAL", "60"))
     timezone: str = os.getenv("TIMEZONE", "America/Costa_Rica")
 
     # Vision / pose estimation

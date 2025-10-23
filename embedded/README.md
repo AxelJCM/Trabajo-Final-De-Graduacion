@@ -83,6 +83,12 @@ CRUNCH_DOWN_ANGLE / CRUNCH_UP_ANGLE
 - **Voz:** registrar tasa de aciertos con `scripts/run_voice_listener.py --verbose` y comparar contra `last_command` en el HUD.
 Documenta los resultados en `docs` o en tu bitácora de capítulos según corresponda.
 
+## Ajustes Fitbit y frecuencia de sondeo
+
+- `FITBIT_POLL_INTERVAL` (segundos): frecuencia del bucle de sondeo de HR. Por defecto 15. Puedes bajarlo a 5 para actualizaciones más ágiles, considerando límites de la API.
+- `FITBIT_STEPS_POLL_INTERVAL` (segundos): frecuencia para consultar pasos (por defecto 60) para no exceder límites.
+- Nota sobre “tiempo real”: El Inspire 3 envía datos a la nube cuando sincroniza con el teléfono/app. Aunque reduzcas el intervalo, la actualización depende de esa sincronización y de tener acceso intradía (1 s/1 min) habilitado en el portal de desarrolladores de Fitbit.
+
 ## Ajustes de rendimiento (FPS)
 
 Si te quedas en ~6 FPS, prueba estos ajustes en `embedded/.env` o como variables de entorno en la Pi:
