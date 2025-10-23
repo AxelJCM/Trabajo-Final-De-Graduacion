@@ -82,3 +82,27 @@ CRUNCH_DOWN_ANGLE / CRUNCH_UP_ANGLE
 - **Biometría:** `staleness_sec` debe permanecer \< `FITBIT_POLL_INTERVAL * 2` cuando Fitbit está sincronizado.
 - **Voz:** registrar tasa de aciertos con `scripts/run_voice_listener.py --verbose` y comparar contra `last_command` en el HUD.
 Documenta los resultados en `docs` o en tu bitácora de capítulos según corresponda.
+
+## Ajustes de rendimiento (FPS)
+
+Si te quedas en ~6 FPS, prueba estos ajustes en `embedded/.env` o como variables de entorno en la Pi:
+
+- Cámara y captura
+   - `CAMERA_WIDTH=640` y `CAMERA_HEIGHT=360` (o 480p si tu webcam lo soporta bien).
+   - `CAMERA_FPS=15` (algunas cámaras son más estables a 10–15 FPS).
+   - `CAMERA_FOURCC=MJPG` para forzar MJPEG en webcams USB y reducir carga de CPU.
+   - `OPENCV_THREADS=1` limita hilos de OpenCV (menos contención en ARM).
+
+- Pipeline de pose
+   - `MODEL_COMPLEXITY=0` (rápido por defecto en MediaPipe).
+   - `POSE_INPUT_LONG_SIDE=320` redimensiona internamente la imagen para inferencia.
+   - `POSE_FRAME_SKIP=1` procesa 1 de cada 2 frames (sube FPS aparente conservando estabilidad visual).
+
+- HUD / encoding
+   - `HUD_TARGET_LONG_SIDE=720` reduce el tamaño del JPEG que se envía al HUD.
+   - `HUD_JPEG_QUALITY=60` baja la calidad para menos CPU.
+   - `HUD_DISABLE=1` apaga el frame para diagnóstico (deberías ver subir el `fps`).
+
+Notas:
+- El buffer de cámara se fija a 1 frame para reducir lag.
+- Si sigue bajo, desactiva temporalmente el listener de voz para aislar la causa, o usa el HUD en modo CLI.

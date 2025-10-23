@@ -81,6 +81,7 @@ class PoseEstimator:
 
     def __init__(self) -> None:
         self.settings = get_settings()
+        # Nota: mantener en minúsculas internamente; el HUD lo muestra con mayúscula inicial
         self.exercise: str = "squat"
         self.phase: str = "up"
         self.rep_count: int = 0
@@ -99,6 +100,9 @@ class PoseEstimator:
         self._cap = None
         self._mp_landmarks = None
         self._mock_progress: float = 0.0
+        self._frame_counter: int = 0
+        self._last_joints: List[PoseJoint] = []
+        self._last_angles: PoseAngles = PoseAngles()
         self._thresholds = {
             "squat": {
                 "down": float(self.settings.squat_down_angle),
@@ -230,6 +234,12 @@ class PoseEstimator:
 
     def _init_realtime_pipeline(self) -> None:  # pragma: no cover - hardware path
         assert cv2 is not None and mp is not None
+        try:
+            # Limit OpenCV threads on low-power devices (reduces contention)
+            if hasattr(cv2, "setNumThreads"):
+                cv2.setNumThreads(int(self.settings.opencv_threads))
+        except Exception:
+            pass
         mp_pose = mp.solutions.pose
         self._pose = mp_pose.Pose(
             static_image_mode=False,
@@ -249,6 +259,19 @@ class PoseEstimator:
         self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, int(self.settings.camera_width))
         self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, int(self.settings.camera_height))
         self._cap.set(cv2.CAP_PROP_FPS, int(self.settings.camera_fps))
+        # Reduce camera internal buffer to minimize latency
+        try:
+            self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        except Exception:
+            pass
+        # Optionally force a specific FOURCC (e.g., MJPG) for higher FPS on USB webcams
+        try:
+            fourcc = (self.settings.camera_fourcc or "").strip().upper()
+            if fourcc:
+                code = cv2.VideoWriter_fourcc(*fourcc[:4])
+                self._cap.set(cv2.CAP_PROP_FOURCC, code)
+        except Exception:
+            pass
 
     def _process_frame(self) -> Tuple[List[PoseJoint], PoseAngles, Optional[np.ndarray]]:
         if self._mock:
@@ -259,10 +282,33 @@ class PoseEstimator:
             logger.warning("Camera read failed; switching to mock mode")
             self._mock = True
             return self._mock_frame()
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        results = self._pose.process(rgb) if self._pose else None  # type: ignore[attr-defined]
+        # Frame skipping: process only 1 of (skip+1) frames, reuse last angles/joints otherwise
+        self._frame_counter += 1
+        do_process = True
+        skip = max(0, int(getattr(self.settings, "pose_frame_skip", 0)))
+        if skip > 0 and (self._frame_counter % (skip + 1) != 0) and self._last_joints and self._last_angles:
+            do_process = False
+
+        results = None
+        if do_process:
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            # Optional downscale for inference to speed up MediaPipe
+            target_long = max(0, int(getattr(self.settings, "pose_input_long_side", 0)))
+            if target_long and max(rgb.shape[0], rgb.shape[1]) > target_long:
+                h, w = rgb.shape[:2]
+                scale = float(target_long) / float(max(h, w))
+                new_size = (max(1, int(w * scale)), max(1, int(h * scale)))
+                rgb_small = cv2.resize(rgb, new_size, interpolation=cv2.INTER_AREA)
+                results = self._pose.process(rgb_small) if self._pose else None  # type: ignore[attr-defined]
+            else:
+                results = self._pose.process(rgb) if self._pose else None  # type: ignore[attr-defined]
         if not results or not results.pose_landmarks:
-            return [], PoseAngles(), frame
+            if do_process:
+                # No detection; reset last values
+                self._last_joints = []
+                self._last_angles = PoseAngles()
+            # Return previous if available to keep FPS high; else empty
+            return list(self._last_joints), self._last_angles, frame
         landmarks = results.pose_landmarks.landmark
         points = self._landmark_points(landmarks)
         joints = [
@@ -270,6 +316,9 @@ class PoseEstimator:
             for name, pt in points.items()
         ]
         angles = self._compute_angles(points)
+        # Cache for skipped frames
+        self._last_joints = list(joints)
+        self._last_angles = angles
         return joints, angles, frame
 
     def _landmark_points(self, landmarks) -> Dict[str, Tuple[float, float, float, float]]:
@@ -586,12 +635,14 @@ class PoseEstimator:
     def _encode_frame(self, frame: Optional[np.ndarray], joints: List[PoseJoint], quality: float) -> Optional[str]:
         if frame is None or cv2 is None:
             return None
+        if getattr(self.settings, "hud_disable", False):
+            return None
         frame_to_encode = frame.copy()
         frame_to_encode = self._draw_skeleton(frame_to_encode, joints, quality)
         rotate = int(getattr(self.settings, "hud_frame_rotate", 0))
         frame_to_encode = self._apply_rotation(frame_to_encode, rotate)
         h, w = frame_to_encode.shape[:2]
-        target_long_side = 960
+        target_long_side = int(getattr(self.settings, "hud_target_long_side", 960))
         scale = target_long_side / float(max(h, w))
         if scale < 1.0:
             frame_to_encode = cv2.resize(
@@ -599,7 +650,8 @@ class PoseEstimator:
                 (int(w * scale), int(h * scale)),
                 interpolation=cv2.INTER_AREA,
             )
-        success, buffer = cv2.imencode(".jpg", frame_to_encode, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
+        jpeg_q = max(30, min(95, int(getattr(self.settings, "hud_jpeg_quality", 70))))
+        success, buffer = cv2.imencode(".jpg", frame_to_encode, [int(cv2.IMWRITE_JPEG_QUALITY), jpeg_q])
         if not success:
             return None
         return base64.b64encode(buffer).decode("ascii")

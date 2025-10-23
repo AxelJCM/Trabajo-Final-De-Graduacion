@@ -299,7 +299,8 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
 
         status = (session.get("status") or "idle").title()
         duration = _fmt_duration(session.get("duration_sec"))
-        exercise = posture.get("exercise") or session.get("exercise") or "--"
+        exercise_raw = posture.get("exercise") or session.get("exercise") or "--"
+        exercise = str(exercise_raw).replace("_", " ").title()
         reps = posture.get("rep_count", 0)
         phase = posture.get("phase_label") or posture.get("phase") or "--"
 
@@ -573,7 +574,8 @@ async def cli_loop(base_url: str) -> None:
                 duration = _fmt_duration(session.get("duration_sec"))
                 active = _fmt_duration(session.get("duration_active_sec"))
                 command = session.get("last_command", "--")
-                exercise = posture.get("exercise") or session.get("exercise") or "--"
+                exercise_raw = posture.get("exercise") or session.get("exercise") or "--"
+                exercise = str(exercise_raw).replace("_", " ").title()
                 reps_total = posture.get("rep_count", 0)
                 reps_current = posture.get("current_exercise_reps", 0)
                 feedback = posture.get("feedback", "Sin feedback")

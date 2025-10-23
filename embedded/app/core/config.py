@@ -72,10 +72,14 @@ class Settings(BaseModel):
     camera_width: int = int(os.getenv("CAMERA_WIDTH", "640"))
     camera_height: int = int(os.getenv("CAMERA_HEIGHT", "360"))
     camera_fps: int = int(os.getenv("CAMERA_FPS", "15"))
+    camera_fourcc: str = os.getenv("CAMERA_FOURCC", "")
+    opencv_threads: int = int(os.getenv("OPENCV_THREADS", "1"))
     model_complexity: int = int(os.getenv("MODEL_COMPLEXITY", "0"))
     vision_mock: bool = os.getenv("VISION_MOCK", "0").strip().lower() in {"1", "true", "yes", "on"}
     pose_latency_window: int = int(os.getenv("POSE_LATENCY_WINDOW", "90"))
     pose_quality_window: int = int(os.getenv("POSE_QUALITY_WINDOW", "30"))
+    pose_frame_skip: int = int(os.getenv("POSE_FRAME_SKIP", "0"))  # process 1 of (skip+1) frames
+    pose_input_long_side: int = int(os.getenv("POSE_INPUT_LONG_SIDE", "320"))  # resize for inference
     squat_down_angle: float = float(os.getenv("SQUAT_DOWN_ANGLE", "80"))
     squat_up_angle: float = float(os.getenv("SQUAT_UP_ANGLE", "160"))
     pushup_down_angle: float = float(os.getenv("PUSHUP_DOWN_ANGLE", "75"))
@@ -83,6 +87,9 @@ class Settings(BaseModel):
     crunch_down_angle: float = float(os.getenv("CRUNCH_DOWN_ANGLE", "50"))
     crunch_up_angle: float = float(os.getenv("CRUNCH_UP_ANGLE", "150"))
     hud_frame_rotate: int = int(os.getenv("HUD_FRAME_ROTATE", "0"))
+    hud_disable: bool = os.getenv("HUD_DISABLE", "0").strip().lower() in {"1", "true", "yes", "on"}
+    hud_target_long_side: int = int(os.getenv("HUD_TARGET_LONG_SIDE", "720"))
+    hud_jpeg_quality: int = int(os.getenv("HUD_JPEG_QUALITY", "60"))
 
 
 @lru_cache
