@@ -72,6 +72,10 @@ class FitbitClient:
         self._history: deque[Metrics] = deque(maxlen=512)
         # Throttle steps fetches to reduce API usage; HR can be more frequent
         self._last_steps_fetch: Optional[datetime] = None
+        # Device last sync tracking (helps detect when the watch hasn't synced to phone/cloud)
+        self._last_device_sync: Optional[datetime] = None
+        self._last_device_sync_age_sec: Optional[float] = None
+        self._last_device_sync_checked_at: Optional[datetime] = None
 
         if not access_token:
             db = SessionLocal()
@@ -269,9 +273,11 @@ class FitbitClient:
                 "message": f"Error Fitbit ({metrics.error})",
             }
 
-        if staleness <= interval * 2:
+        # Prefer device last-sync age if available; otherwise use local sample staleness
+        age = self._last_device_sync_age_sec if isinstance(self._last_device_sync_age_sec, (int, float)) else staleness
+        if age <= interval * 2:
             level = "green"
-        elif staleness <= interval * 5:
+        elif age <= interval * 5:
             level = "yellow"
         else:
             level = "red"
@@ -279,7 +285,15 @@ class FitbitClient:
         if metrics.heart_rate_source in {"mock", "cached"} and level == "green":
             level = "yellow"
 
-        message = f"Última sync hace {int(staleness)}s"
+        # Compose message with device last sync age if available
+        msg_age = int(age)
+        if msg_age >= 3600:
+            msg_str = f"{msg_age // 3600}h"
+        elif msg_age >= 120:
+            msg_str = f"{msg_age // 60}m"
+        else:
+            msg_str = f"{msg_age}s"
+        message = f"Última sync del reloj hace {msg_str}"
         status = "ok" if level == "green" else ("stale" if level == "yellow" else "offline")
         return {
             "status": status,
@@ -402,6 +416,8 @@ class FitbitClient:
                     )
                 # Fetch daily steps similar to tutorial example
                 steps, steps_source = await self._get_daily_steps(headers)
+                # Opportunistically refresh device last-sync information (throttled)
+                await self._maybe_refresh_device_sync(headers)
                 self._last_error = None
                 return self._update_cache(
                     heart_rate_bpm=hr,
@@ -427,6 +443,58 @@ class FitbitClient:
             steps_source=last.steps_source if last else "cached",
             error=self._last_error or "fitbit_fetch_failed",
         )
+
+    async def _maybe_refresh_device_sync(self, headers: dict) -> None:
+        """Refresh the user's device last-sync time from Fitbit Cloud (throttled).
+
+        Uses /1/user/-/devices.json to find the most recent lastSyncTime among devices.
+        We use this to derive connectivity status even when our own cache is fresh.
+        """
+        if httpx is None or not self.access_token:
+            return
+        now = datetime.now(timezone.utc)
+        # Throttle to avoid excessive calls
+        if self._last_device_sync_checked_at and (now - self._last_device_sync_checked_at).total_seconds() < 60:
+            return
+        url = "https://api.fitbit.com/1/user/-/devices.json"
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.get(url, headers=headers)
+                if r.status_code == 401:
+                    await self._refresh()
+                    new_headers = {"Authorization": f"Bearer {self.access_token}"}
+                    r = await client.get(url, headers=new_headers)
+                if r.status_code >= 400:
+                    # Best effort; ignore if unavailable
+                    self._last_device_sync_checked_at = now
+                    return
+                arr = r.json()
+                last_sync: Optional[datetime] = None
+                if isinstance(arr, list):
+                    for d in arr:
+                        if not isinstance(d, dict):
+                            continue
+                        ts = d.get("lastSyncTime") or d.get("lastSyncTime")
+                        if isinstance(ts, str) and ts:
+                            try:
+                                parsed = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                                if parsed.tzinfo is None:
+                                    parsed = parsed.replace(tzinfo=timezone.utc)
+                                else:
+                                    parsed = parsed.astimezone(timezone.utc)
+                                if last_sync is None or parsed > last_sync:
+                                    last_sync = parsed
+                            except Exception:
+                                continue
+                self._last_device_sync = last_sync
+                self._last_device_sync_checked_at = now
+                if last_sync is not None:
+                    self._last_device_sync_age_sec = max(0.0, (now - last_sync).total_seconds())
+                else:
+                    self._last_device_sync_age_sec = None
+        except Exception as exc:
+            logger.debug("Device last-sync fetch failed: {}", exc)
+            self._last_device_sync_checked_at = now
 
     async def _refresh(self):
         if httpx is None or not self.refresh_token:
