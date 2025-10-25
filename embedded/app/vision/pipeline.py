@@ -445,10 +445,12 @@ class PoseEstimator:
         return p50, p95
 
     def _compute_quality(self, angles: PoseAngles) -> float:
-        thresholds = self._thresholds.get(self.exercise, self._thresholds["squat"])
-        down = thresholds["down"]
-        up = thresholds["up"]
-        target = down if self.phase == "up" else up
+    thresholds = self._thresholds.get(self.exercise, self._thresholds["squat"])
+    down = thresholds["down"]
+    up = thresholds["up"]
+    # For coloring, compare against the current expected posture for the phase
+    # If we're in 'up' phase (de pie/extendido), target should be 'up'; in 'down' phase, target is 'down'.
+    target_current = up if self.phase == "up" else down
         angle_value = self._primary_angle_smoothed(angles)
         if angle_value is None:
             return 0.0
@@ -779,16 +781,17 @@ class PoseEstimator:
 
         # Compute per-part errors
         parts: Dict[str, float] = {}
-        # Legs: use individual knees when available
-        if angles.left_knee is not None:
-            parts["left_leg"] = abs(float(angles.left_knee) - target)
-        if angles.right_knee is not None:
-            parts["right_leg"] = abs(float(angles.right_knee) - target)
+        # Legs: only relevant for squat; use individual knees vs current target
+        if self.exercise == "squat":
+            if angles.left_knee is not None:
+                parts["left_leg"] = abs(float(angles.left_knee) - target_current)
+            if angles.right_knee is not None:
+                parts["right_leg"] = abs(float(angles.right_knee) - target_current)
         # Arms: push-up primary is elbow; in otros ejercicios, mantén verde salvo datos presentes
         if angles.left_elbow is not None:
-            parts.setdefault("left_arm", abs(float(angles.left_elbow) - target) if self.exercise == "pushup" else 0.0)
+            parts.setdefault("left_arm", abs(float(angles.left_elbow) - target_current) if self.exercise == "pushup" else 0.0)
         if angles.right_elbow is not None:
-            parts.setdefault("right_arm", abs(float(angles.right_elbow) - target) if self.exercise == "pushup" else 0.0)
+            parts.setdefault("right_arm", abs(float(angles.right_elbow) - target_current) if self.exercise == "pushup" else 0.0)
         # Torso: penaliza inclinación excesiva (squat) o falta de flexión (crunch)
         torso_err = 0.0
         if self.exercise == "squat":
@@ -797,7 +800,7 @@ class PoseEstimator:
         elif self.exercise == "crunch":
             # Usa alineación hombro-cadera como indicador de flexión del tronco
             if angles.shoulder_hip_alignment is not None:
-                torso_err = abs(float(angles.shoulder_hip_alignment) - target)
+                torso_err = abs(float(angles.shoulder_hip_alignment) - target_current)
         elif self.exercise == "pushup":
             # Torso caído arqueado: torsión pequeña implica peor (usar inverso)
             tf = float(angles.torso_forward or 0.0)

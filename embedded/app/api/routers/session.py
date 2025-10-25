@@ -87,14 +87,10 @@ def session_start(payload: Optional[dict] = None) -> Envelope:
     reset_totals = bool(data.get("reset", True))
     resume = bool(data.get("resume", False))
 
-    # If we're paused and the caller didn't explicitly request reset or change exercise,
-    # interpret a plain "start" as resume by default to avoid resetting time/reps.
+    # Strong rule: if we're paused and caller didn't explicitly ask for reset,
+    # treat any start (even with 'exercise' provided) as resume to preserve time & reps.
     paused = _state.get("status") == "paused"
-    if paused and ("resume" not in data) and ("reset" not in data) and ("exercise" not in data):
-        resume = True
-        reset_totals = False
-
-    if _state.get("started_at") and _state.get("status") == "paused" and (resume or not reset_totals):
+    if paused and not bool(data.get("reset", False)):
         now = _now()
         _state["status"] = "active"
         _state["active_started_at"] = now
@@ -102,7 +98,7 @@ def session_start(payload: Optional[dict] = None) -> Envelope:
         _state["last_summary"] = None
         pose_estimator.set_counting_enabled(True)
         _mark_command("resume")
-        logger.info("Session resumed")
+        logger.info("Session resumed (exercise param ignored on resume)")
         return Envelope(
             success=True,
             data={
@@ -111,6 +107,8 @@ def session_start(payload: Optional[dict] = None) -> Envelope:
                 "started_at": (_state.get("started_at") or now).isoformat(),
             },
         )
+
+    # Normal start flow (idle or explicit reset when paused)
 
     if exercise:
         pose_estimator.set_exercise(str(exercise), reset=True)
