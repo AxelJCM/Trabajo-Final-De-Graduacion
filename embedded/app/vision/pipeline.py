@@ -445,12 +445,11 @@ class PoseEstimator:
         return p50, p95
 
     def _compute_quality(self, angles: PoseAngles) -> float:
-    thresholds = self._thresholds.get(self.exercise, self._thresholds["squat"])
-    down = thresholds["down"]
-    up = thresholds["up"]
-    # For coloring, compare against the current expected posture for the phase
-    # If we're in 'up' phase (de pie/extendido), target should be 'up'; in 'down' phase, target is 'down'.
-    target_current = up if self.phase == "up" else down
+        thresholds = self._thresholds.get(self.exercise, self._thresholds["squat"])
+        down = thresholds["down"]
+        up = thresholds["up"]
+        # Quality compares against expected posture for current phase
+        target = up if self.phase == "up" else down
         angle_value = self._primary_angle_smoothed(angles)
         if angle_value is None:
             return 0.0
@@ -534,7 +533,7 @@ class PoseEstimator:
             return None
         # Heuristics per exercise
         if self.exercise == "squat":
-            target = down if self.phase == "up" else up
+            target = up if self.phase == "up" else down
             key = worst(parts, ["torso", "left_leg", "right_leg"])
             if key == "torso":
                 return "straight_back", "Mantén la espalda recta"
@@ -545,7 +544,7 @@ class PoseEstimator:
                 else:
                     return "extend_" + side, f"Extiende más la rodilla {side}"
         elif self.exercise == "pushup":
-            target = down if self.phase == "up" else up
+            target = up if self.phase == "up" else down
             key = worst(parts, ["left_arm", "right_arm", "torso"])
             if key in ("left_arm", "right_arm"):
                 side = "izquierdo" if key == "left_arm" else "derecho"
@@ -556,7 +555,7 @@ class PoseEstimator:
             if key == "torso":
                 return "brace_core", "Activa el core; evita arquear el torso"
         elif self.exercise == "crunch":
-            target = down if self.phase == "up" else up
+            target = up if self.phase == "up" else down
             key = worst(parts, ["torso", "left_leg", "right_leg"])  # torso refleja flexión del tronco
             if key == "torso":
                 if angle_value < target - margin:
@@ -767,7 +766,7 @@ class PoseEstimator:
         thresholds = self._thresholds.get(self.exercise, self._thresholds["squat"])
         down = thresholds["down"]
         up = thresholds["up"]
-        target = down if self.phase == "up" else up
+        target_current = up if self.phase == "up" else down
         # Range-based margin scales with exercise
         range_span = max(10.0, abs(up - down))
         margin = max(5.0, range_span * 0.10)
