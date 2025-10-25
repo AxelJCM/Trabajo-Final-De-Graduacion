@@ -87,6 +87,13 @@ def session_start(payload: Optional[dict] = None) -> Envelope:
     reset_totals = bool(data.get("reset", True))
     resume = bool(data.get("resume", False))
 
+    # If we're paused and the caller didn't explicitly request reset or change exercise,
+    # interpret a plain "start" as resume by default to avoid resetting time/reps.
+    paused = _state.get("status") == "paused"
+    if paused and ("resume" not in data) and ("reset" not in data) and ("exercise" not in data):
+        resume = True
+        reset_totals = False
+
     if _state.get("started_at") and _state.get("status") == "paused" and (resume or not reset_totals):
         now = _now()
         _state["status"] = "active"

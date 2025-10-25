@@ -133,3 +133,38 @@ async def test_session_voice_event_endpoint():
 
         await ac.post("/session/stop", json={})
 
+
+@pytest.mark.asyncio
+async def test_pause_then_start_without_flags_resumes():
+    async with AsyncClient(app=app, base_url="http://test") as ac:
+        r = await ac.post("/session/start", json={"exercise": "squat"})
+        assert r.status_code == 200
+
+        st1 = (await ac.get("/session/status")).json()["data"]
+        d1 = st1["duration_sec"]
+
+        # Pause
+        rp = await ac.post("/session/pause", json={})
+        assert rp.status_code == 200
+
+        st2 = (await ac.get("/session/status")).json()["data"]
+        d2 = st2["duration_sec"]
+        assert d2 >= d1
+
+        # Call start WITHOUT resume/reset flags to simulate voice "iniciar"
+        rs = await ac.post("/session/start", json={})
+        assert rs.status_code == 200
+        data = rs.json()["data"]
+        assert data["status"] == "active"
+
+        # Ensure duration didn't reset to 0; it should resume
+        st3 = (await ac.get("/session/status")).json()["data"]
+        assert st3["duration_sec"] >= d2
+
+        # And reps are preserved over pause
+        reps_before = st1.get("rep_count", 0)
+        reps_after = st3.get("rep_count", 0)
+        assert reps_after >= reps_before
+
+        await ac.post("/session/stop", json={})
+
