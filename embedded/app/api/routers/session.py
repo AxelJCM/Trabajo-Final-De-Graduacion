@@ -259,7 +259,10 @@ def set_exercise(payload: dict) -> Envelope:
 def session_status() -> Envelope:
     started = _state.get("started_at")
     now = _now()
-    duration = max(0, int((now - started).total_seconds())) if isinstance(started, datetime) else 0
+    # Show elapsed session time that pauses when the session is paused (active-only)
+    duration_active = _active_duration(now)
+    # Keep total as an additional field for completeness
+    duration_total = max(0, int((now - started).total_seconds())) if isinstance(started, datetime) else 0
     phase_label = pose_estimator.get_phase_label()
     return Envelope(
         success=True,
@@ -274,8 +277,10 @@ def session_status() -> Envelope:
             "feedback": pose_estimator.feedback,
             "feedback_code": pose_estimator.feedback_code,
             "started_at": started.isoformat() if isinstance(started, datetime) else None,
-            "duration_sec": duration,
-            "duration_active_sec": _active_duration(now),
+            # duration_sec reflects active elapsed time (pauses stop the clock)
+            "duration_sec": duration_active,
+            "duration_active_sec": duration_active,
+            "duration_total_sec": duration_total,
             "last_command": _state.get("last_command"),
             "last_command_ts": (
                 _state["last_command_ts"].isoformat() if isinstance(_state.get("last_command_ts"), datetime) else None

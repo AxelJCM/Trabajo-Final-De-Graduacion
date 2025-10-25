@@ -48,11 +48,22 @@ Variables en `.env.example` permiten ajustar cámara y umbrales por ejercicio:
 ```
 CAMERA_INDEX, CAMERA_WIDTH, CAMERA_HEIGHT, CAMERA_FPS, MODEL_COMPLEXITY
 VISION_MOCK, POSE_LATENCY_WINDOW, POSE_QUALITY_WINDOW
+POSE_REP_HYSTERESIS_DEG, POSE_REP_CONFIRM_FRAMES
 SQUAT_DOWN_ANGLE / SQUAT_UP_ANGLE
 PUSHUP_DOWN_ANGLE / PUSHUP_UP_ANGLE
 CRUNCH_DOWN_ANGLE / CRUNCH_UP_ANGLE
 ```
 `PoseEstimator` expone `reset_session()` y `get_average_quality()` para métricas por sesión.
+
+### Robustez con cámara de frente (front‑facing)
+- Se añadió suavizado del ángulo principal y una histéresis configurable para evitar falsos cambios de fase.
+- Nuevas variables:
+   - `POSE_REP_HYSTERESIS_DEG` (default 8): margen en grados alrededor del umbral para confirmar cambios de fase.
+   - `POSE_REP_CONFIRM_FRAMES` (default 2): cantidad de frames consecutivos cumpliendo la condición antes de alternar la fase.
+- Recomendaciones de umbrales orientativos con cámara de frente:
+   - Push‑up: `PUSHUP_DOWN_ANGLE≈80–90`, `PUSHUP_UP_ANGLE≈160–175`.
+   - Crunch: `CRUNCH_DOWN_ANGLE≈60–80`, `CRUNCH_UP_ANGLE≈140–160`.
+   Ajusta según tu postura y distancia a la cámara.
 
 ## Biometría y almacenamiento
 - Tokens Fitbit en `smartmirror.db`.

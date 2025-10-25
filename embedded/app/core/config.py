@@ -82,6 +82,9 @@ class Settings(BaseModel):
     pose_quality_window: int = int(os.getenv("POSE_QUALITY_WINDOW", "30"))
     pose_frame_skip: int = int(os.getenv("POSE_FRAME_SKIP", "0"))  # process 1 of (skip+1) frames
     pose_input_long_side: int = int(os.getenv("POSE_INPUT_LONG_SIDE", "320"))  # resize for inference
+    # Rep counting stability (front-facing robustness): hysteresis in degrees and frames to confirm transitions
+    pose_rep_hysteresis_deg: float = float(os.getenv("POSE_REP_HYSTERESIS_DEG", "8"))
+    pose_rep_confirm_frames: int = int(os.getenv("POSE_REP_CONFIRM_FRAMES", "2"))
     squat_down_angle: float = float(os.getenv("SQUAT_DOWN_ANGLE", "80"))
     squat_up_angle: float = float(os.getenv("SQUAT_UP_ANGLE", "160"))
     pushup_down_angle: float = float(os.getenv("PUSHUP_DOWN_ANGLE", "75"))

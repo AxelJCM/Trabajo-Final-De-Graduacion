@@ -103,6 +103,9 @@ class PoseEstimator:
         self._frame_counter: int = 0
         self._last_joints: List[PoseJoint] = []
         self._last_angles: PoseAngles = PoseAngles()
+        # Front-facing robustness: smooth primary angle and require confirmation frames
+        self._angle_window: deque[float] = deque(maxlen=5)
+        self._phase_condition_frames: int = 0
         self._thresholds = {
             "squat": {
                 "down": float(self.settings.squat_down_angle),
@@ -160,7 +163,7 @@ class PoseEstimator:
         self.feedback_code = feedback_code
         self.feedback = feedback
 
-        frame_b64 = self._encode_frame(frame, joints, quality)
+        frame_b64 = self._encode_frame(frame, joints, quality, angles)
 
         result = PoseResult(
             fps=round(fps, 2),
@@ -446,7 +449,7 @@ class PoseEstimator:
         down = thresholds["down"]
         up = thresholds["up"]
         target = down if self.phase == "up" else up
-        angle_value = self._primary_angle(angles)
+        angle_value = self._primary_angle_smoothed(angles)
         if angle_value is None:
             return 0.0
         error = abs(angle_value - target)
@@ -460,29 +463,56 @@ class PoseEstimator:
             candidates = [v for v in (angles.left_knee, angles.right_knee) if v is not None]
         elif self.exercise == "pushup":
             candidates = [v for v in (angles.left_elbow, angles.right_elbow) if v is not None]
-        else:  # crunch
-            candidates = [v for v in (angles.left_hip, angles.right_hip, angles.shoulder_hip_alignment) if v is not None]
+        else:  # crunch (front-facing): prefer hip angles; fallback to shoulder-hip alignment
+            hip_candidates = [v for v in (angles.left_hip, angles.right_hip) if v is not None]
+            if hip_candidates:
+                candidates = hip_candidates
+            else:
+                candidates = [v for v in (angles.shoulder_hip_alignment,) if v is not None]
         if not candidates:
             return None
         return float(sum(candidates) / len(candidates))
 
+    def _primary_angle_smoothed(self, angles: PoseAngles) -> Optional[float]:
+        val = self._primary_angle(angles)
+        if val is None:
+            return None
+        self._angle_window.append(float(val))
+        return float(sum(self._angle_window) / max(1, len(self._angle_window)))
+
     def _update_reps(self, angles: PoseAngles) -> None:
-        angle_value = self._primary_angle(angles)
+        angle_value = self._primary_angle_smoothed(angles)
         if angle_value is None:
             return
         thresholds = self._thresholds.get(self.exercise, self._thresholds["squat"])
         down = thresholds["down"]
         up = thresholds["up"]
-        if self.phase == "up" and angle_value <= down:
-            self.phase = "down"
-        elif self.phase == "down" and angle_value >= up:
-            self.phase = "up"
-            if self.counting_enabled:
-                self.rep_count += 1
-                self.rep_totals[self.exercise] = self.rep_totals.get(self.exercise, 0) + 1
+        hyster = float(getattr(self.settings, "pose_rep_hysteresis_deg", 8.0))
+        need_frames = max(1, int(getattr(self.settings, "pose_rep_confirm_frames", 2)))
+        if self.phase == "up":
+            condition = angle_value <= (down + hyster)
+            if condition:
+                self._phase_condition_frames += 1
+                if self._phase_condition_frames >= need_frames:
+                    self.phase = "down"
+                    self._phase_condition_frames = 0
+            else:
+                self._phase_condition_frames = 0
+        else:  # phase == 'down'
+            condition = angle_value >= (up - hyster)
+            if condition:
+                self._phase_condition_frames += 1
+                if self._phase_condition_frames >= need_frames:
+                    self.phase = "up"
+                    self._phase_condition_frames = 0
+                    if self.counting_enabled:
+                        self.rep_count += 1
+                        self.rep_totals[self.exercise] = self.rep_totals.get(self.exercise, 0) + 1
+            else:
+                self._phase_condition_frames = 0
 
     def _feedback_for_angles(self, angles: PoseAngles, quality: float) -> Tuple[str, str]:
-        angle_value = self._primary_angle(angles)
+        angle_value = self._primary_angle_smoothed(angles)
         if angle_value is None:
             return "no_skeleton", "No se detecta el cuerpo"
 
@@ -491,14 +521,52 @@ class PoseEstimator:
         up = thresholds["up"]
         margin = max(5.0, (up - down) * 0.1)
 
+        # Part-aware feedback: choose the most problematic part and craft the message
+        parts = self._compute_part_colors(angles)
+        def worst(parts_map: Dict[str, str], order: list[str]) -> Optional[str]:
+            # Priority: torso > left/right part
+            for severity in ("red", "yellow"):
+                for key in order:
+                    if parts_map.get(key) == severity:
+                        return key
+            return None
+        # Heuristics per exercise
+        if self.exercise == "squat":
+            target = down if self.phase == "up" else up
+            key = worst(parts, ["torso", "left_leg", "right_leg"])
+            if key == "torso":
+                return "straight_back", "Mantén la espalda recta"
+            if key in ("left_leg", "right_leg"):
+                side = "izquierda" if key == "left_leg" else "derecha"
+                if angle_value > target:  # le falta flexión al bajar
+                    return "go_lower_" + side, f"Baja más con la rodilla {side}"
+                else:
+                    return "extend_" + side, f"Extiende más la rodilla {side}"
+        elif self.exercise == "pushup":
+            target = down if self.phase == "up" else up
+            key = worst(parts, ["left_arm", "right_arm", "torso"])
+            if key in ("left_arm", "right_arm"):
+                side = "izquierdo" if key == "left_arm" else "derecho"
+                if angle_value > target:
+                    return "go_lower_" + side, f"Flexiona más el codo {side}"
+                else:
+                    return "extend_" + side, f"Extiende más el codo {side}"
+            if key == "torso":
+                return "brace_core", "Activa el core; evita arquear el torso"
+        elif self.exercise == "crunch":
+            target = down if self.phase == "up" else up
+            key = worst(parts, ["torso", "left_leg", "right_leg"])  # torso refleja flexión del tronco
+            if key == "torso":
+                if angle_value < target - margin:
+                    return "protect_neck", "No cargues el cuello"
+                return "go_higher", "Activa el abdomen y sube"
+
+        # Fallback genérico si no se detecta parte dominante
         if self.exercise == "squat":
             if angle_value > up - margin:
                 return "go_lower", "Baja más la cadera"
             if angle_value < down + margin:
                 return "control_up", "Controla el ascenso"
-            torso = angles.torso_forward or 0.0
-            if torso > 25:
-                return "straight_back", "Mantén la espalda recta"
         elif self.exercise == "pushup":
             if angle_value > up - margin:
                 return "go_lower", "Flexiona más los codos"
@@ -508,7 +576,7 @@ class PoseEstimator:
             if angle_value < down - margin:
                 return "protect_neck", "No cargues el cuello"
             if angle_value > up - margin:
-                return "go_lower", "Activa el abdomen y sube"
+                return "go_higher", "Activa el abdomen y sube"
 
         if quality >= 85:
             return "excellent", "Excelente técnica"
@@ -609,55 +677,70 @@ class PoseEstimator:
             return cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
         return frame
 
-    def _draw_skeleton(self, frame: np.ndarray, joints: List[PoseJoint], quality: float) -> np.ndarray:
+    def _draw_skeleton(self, frame: np.ndarray, joints: List[PoseJoint], quality: float, angles: PoseAngles) -> np.ndarray:
         if cv2 is None or not joints:
             return frame
         height, width = frame.shape[:2]
         joint_map = {j.name: j for j in joints}
-        if quality >= 85:
-            color = (0, 200, 0)
-        elif quality >= 65:
-            color = (0, 215, 255)
-        else:
-            color = (0, 0, 255)
+        # Compute per-part status colors (green/yellow/red) based on angle deviations
+        part_colors = self._compute_part_colors(angles)
+        def color_for(part: str) -> tuple[int, int, int]:
+            level = part_colors.get(part, "green")
+            if level == "red":
+                return (0, 0, 255)
+            if level == "yellow":
+                return (0, 215, 255)
+            return (0, 200, 0)
         thickness = max(2, width // 240)
         radius = max(3, width // 180)
+        # Map each connection to a part for coloring
         connections = [
-            ("left_ankle", "left_knee"),
-            ("left_knee", "left_hip"),
-            ("left_hip", "left_shoulder"),
-            ("left_shoulder", "left_elbow"),
-            ("left_elbow", "left_wrist"),
-            ("right_ankle", "right_knee"),
-            ("right_knee", "right_hip"),
-            ("right_hip", "right_shoulder"),
-            ("right_shoulder", "right_elbow"),
-            ("right_elbow", "right_wrist"),
-            ("left_shoulder", "right_shoulder"),
-            ("left_hip", "right_hip"),
+            ("left_ankle", "left_knee", "left_leg"),
+            ("left_knee", "left_hip", "left_leg"),
+            ("left_hip", "left_shoulder", "torso"),
+            ("left_shoulder", "left_elbow", "left_arm"),
+            ("left_elbow", "left_wrist", "left_arm"),
+            ("right_ankle", "right_knee", "right_leg"),
+            ("right_knee", "right_hip", "right_leg"),
+            ("right_hip", "right_shoulder", "torso"),
+            ("right_shoulder", "right_elbow", "right_arm"),
+            ("right_elbow", "right_wrist", "right_arm"),
+            ("left_shoulder", "right_shoulder", "torso"),
+            ("left_hip", "right_hip", "torso"),
         ]
 
         def to_pixel(j: PoseJoint) -> Tuple[int, int]:
             return int(j.x * width), int(j.y * height)
 
-        for a, b in connections:
+        for a, b, part in connections:
             ja = joint_map.get(a)
             jb = joint_map.get(b)
             if ja and jb and ja.score > 0.2 and jb.score > 0.2:
-                cv2.line(frame, to_pixel(ja), to_pixel(jb), color, thickness, cv2.LINE_AA)
+                cv2.line(frame, to_pixel(ja), to_pixel(jb), color_for(part), thickness, cv2.LINE_AA)
         for joint in joints:
             if joint.score <= 0.2:
                 continue
-            cv2.circle(frame, to_pixel(joint), radius, color, thickness=-1, lineType=cv2.LINE_AA)
+            # Color joint by its closest part
+            if joint.name.startswith("left_") and any(x in joint.name for x in ("knee","ankle","hip")):
+                jc = color_for("left_leg")
+            elif joint.name.startswith("right_") and any(x in joint.name for x in ("knee","ankle","hip")):
+                jc = color_for("right_leg")
+            elif joint.name.startswith("left_") and any(x in joint.name for x in ("elbow","wrist","shoulder")):
+                jc = color_for("left_arm")
+            elif joint.name.startswith("right_") and any(x in joint.name for x in ("elbow","wrist","shoulder")):
+                jc = color_for("right_arm")
+            else:
+                jc = color_for("torso")
+            cv2.circle(frame, to_pixel(joint), radius, jc, thickness=-1, lineType=cv2.LINE_AA)
         return frame
 
-    def _encode_frame(self, frame: Optional[np.ndarray], joints: List[PoseJoint], quality: float) -> Optional[str]:
+    def _encode_frame(self, frame: Optional[np.ndarray], joints: List[PoseJoint], quality: float, angles: PoseAngles) -> Optional[str]:
         if frame is None or cv2 is None:
             return None
         if getattr(self.settings, "hud_disable", False):
             return None
         frame_to_encode = frame.copy()
-        frame_to_encode = self._draw_skeleton(frame_to_encode, joints, quality)
+        frame_to_encode = self._draw_skeleton(frame_to_encode, joints, quality, angles)
         rotate = int(getattr(self.settings, "hud_frame_rotate", 0))
         frame_to_encode = self._apply_rotation(frame_to_encode, rotate)
         h, w = frame_to_encode.shape[:2]
@@ -674,6 +757,58 @@ class PoseEstimator:
         if not success:
             return None
         return base64.b64encode(buffer).decode("ascii")
+
+    def _compute_part_colors(self, angles: PoseAngles) -> Dict[str, str]:
+        """Return per-part color levels {'left_arm','right_arm','left_leg','right_leg','torso'}.
+        Levels: 'green' | 'yellow' | 'red', derived from deviation vs target thresholds.
+        """
+        thresholds = self._thresholds.get(self.exercise, self._thresholds["squat"])
+        down = thresholds["down"]
+        up = thresholds["up"]
+        target = down if self.phase == "up" else up
+        # Range-based margin scales with exercise
+        range_span = max(10.0, abs(up - down))
+        margin = max(5.0, range_span * 0.10)
+
+        def level_for_error(err: float) -> str:
+            if err <= margin:
+                return "green"
+            if err <= 2 * margin:
+                return "yellow"
+            return "red"
+
+        # Compute per-part errors
+        parts: Dict[str, float] = {}
+        # Legs: use individual knees when available
+        if angles.left_knee is not None:
+            parts["left_leg"] = abs(float(angles.left_knee) - target)
+        if angles.right_knee is not None:
+            parts["right_leg"] = abs(float(angles.right_knee) - target)
+        # Arms: push-up primary is elbow; in otros ejercicios, mantén verde salvo datos presentes
+        if angles.left_elbow is not None:
+            parts.setdefault("left_arm", abs(float(angles.left_elbow) - target) if self.exercise == "pushup" else 0.0)
+        if angles.right_elbow is not None:
+            parts.setdefault("right_arm", abs(float(angles.right_elbow) - target) if self.exercise == "pushup" else 0.0)
+        # Torso: penaliza inclinación excesiva (squat) o falta de flexión (crunch)
+        torso_err = 0.0
+        if self.exercise == "squat":
+            tf = float(angles.torso_forward or 0.0)
+            torso_err = max(0.0, tf - 25.0)  # >25° se considera excesivo
+        elif self.exercise == "crunch":
+            # Usa alineación hombro-cadera como indicador de flexión del tronco
+            if angles.shoulder_hip_alignment is not None:
+                torso_err = abs(float(angles.shoulder_hip_alignment) - target)
+        elif self.exercise == "pushup":
+            # Torso caído arqueado: torsión pequeña implica peor (usar inverso)
+            tf = float(angles.torso_forward or 0.0)
+            torso_err = max(0.0, 10.0 - tf)
+        parts["torso"] = parts.get("torso", 0.0) + torso_err
+
+        # Default greens for missing parts
+        for k in ("left_arm", "right_arm", "left_leg", "right_leg", "torso"):
+            parts.setdefault(k, 0.0)
+
+        return {k: level_for_error(v) for k, v in parts.items()}
 
     def get_fps_avg(self) -> float:
         if not self._fps_window:
