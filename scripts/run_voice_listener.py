@@ -74,6 +74,18 @@ def trigger_intent(intent: str, base_url: str) -> None:
     base = base_url.rstrip("/")
     try:
         if intent == "start":
+            # Resume if paused; otherwise start fresh with current exercise
+            st = requests.get(base + "/session/status", timeout=5)
+            st.raise_for_status()
+            sdata = st.json().get("data", {})
+            status = (sdata.get("status") or "idle").lower()
+            if status == "paused":
+                url = base + "/session/start"
+                resp = requests.post(url, json={"resume": True, "reset": False}, timeout=5)
+                resp.raise_for_status()
+                print(f"[VOICE] Intent 'start' executed -> resume session")
+                return
+            # idle or active -> treat as (re)start for current cycle exercise
             exercise = EXERCISE_CYCLE[cycle_index]
             url = base + "/session/start"
             resp = requests.post(url, json={"exercise": exercise, "reset": True}, timeout=5)
