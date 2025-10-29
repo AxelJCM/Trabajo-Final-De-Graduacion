@@ -46,18 +46,38 @@ def export_posture(base_url: str, out_dir: Path, *, duration_min: float = 0.0, p
         # Always fetch summary first
         import requests
         base = base_url.rstrip("/")
-        # /debug/metrics
+        # Vision metrics: prefer posture_series values if provided, else /debug/metrics
         fps, p50, p95 = 0.0, 0.0, 0.0
-        try:
-            r = requests.get(f"{base}/debug/metrics", timeout=3)
-            r.raise_for_status()
-            d = r.json() or {}
-            fps = float(((d.get("fps") or {}).get("avg")) or 0.0)
-            lat = (d.get("latency_ms") or {})
-            p50 = float(lat.get("p50") or 0.0)
-            p95 = float(lat.get("p95") or 0.0)
-        except Exception as exc:
-            logger.warning("export_posture: no metrics: {}", exc)
+        if posture_series:
+            try:
+                lats = []
+                fps_vals = []
+                for s in posture_series:
+                    lat_v = getattr(s, "latency_ms", None) if hasattr(s, "latency_ms") else (s.get("latency_ms") if isinstance(s, dict) else None)
+                    fps_v = getattr(s, "fps", None) if hasattr(s, "fps") else (s.get("fps") if isinstance(s, dict) else None)
+                    if lat_v is not None:
+                        lats.append(float(lat_v))
+                    if fps_v is not None:
+                        fps_vals.append(float(fps_v))
+                if lats:
+                    from statistics import median
+                    p50 = median(lats)
+                    p95 = sorted(lats)[int(0.95 * len(lats)) - 1] if len(lats) > 1 else p50
+                if fps_vals:
+                    fps = sum(fps_vals) / len(fps_vals)
+            except Exception as exc:
+                logger.warning("export_posture: fallo al calcular lat/fps desde series: {}", exc)
+        if fps == 0.0 and p50 == 0.0 and p95 == 0.0:
+            try:
+                r = requests.get(f"{base}/debug/metrics", timeout=3)
+                r.raise_for_status()
+                d = r.json() or {}
+                fps = float(((d.get("fps") or {}).get("avg")) or 0.0)
+                lat = (d.get("latency_ms") or {})
+                p50 = float(lat.get("p50") or 0.0)
+                p95 = float(lat.get("p95") or 0.0)
+            except Exception as exc:
+                logger.warning("export_posture: no metrics: {}", exc)
         # /session/status
         quality_avg, rep_totals = 0.0, {}
         try:
@@ -247,29 +267,61 @@ def export_voice(log_path: Path, out_dir: Path, *, window_start_utc: Optional[da
                     if tt and tr and tr != _dt.min:
                         latencies.setdefault(it, []).append((tt - tr).total_seconds() * 1000.0)
         else:
-            # Fallback: parse logs and filter by window
-            with log_path.open("r", encoding="utf-8", errors="ignore") as f:
-                for line in f:
-                    t = parse_time_prefix(line)
-                    if window_start_utc and t and t < window_start_utc:
-                        continue
-                    if window_end_utc and t and t > window_end_utc:
-                        continue
-                    m = REC_RE.search(line)
-                    if m:
-                        it = m.group(1)
-                        recognized[it] = recognized.get(it, 0) + 1
-                        last_rec.setdefault(it, []).append(t or _dt.min)
-                        continue
-                    m = EXEC_RE.search(line)
-                    if m:
-                        it = m.group(1)
-                        executed[it] = executed.get(it, 0) + 1
-                        if last_rec.get(it):
-                            tr = last_rec[it].pop(0)
-                            if t and tr and tr != _dt.min:
-                                lat = (t - tr).total_seconds() * 1000.0
-                                latencies.setdefault(it, []).append(lat)
+            # Fallback: parse logs and filter by window. Try both app.log and voice.log
+            logs_to_parse = [log_path]
+            try:
+                alt = log_path.parent / "voice.log"
+                if alt.exists():
+                    logs_to_parse.append(alt)
+            except Exception:
+                pass
+
+            def _parse_file(p: Path) -> None:
+                try:
+                    with p.open("r", encoding="utf-8", errors="ignore") as f:
+                        for line in f:
+                            t = parse_time_prefix(line)
+                            if window_start_utc and t and t < window_start_utc:
+                                continue
+                            if window_end_utc and t and t > window_end_utc:
+                                continue
+                            m = REC_RE.search(line)
+                            if m:
+                                it = m.group(1)
+                                recognized[it] = recognized.get(it, 0) + 1
+                                last_rec.setdefault(it, []).append(t or _dt.min)
+                                continue
+                            m = EXEC_RE.search(line)
+                            if m:
+                                it = m.group(1)
+                                executed[it] = executed.get(it, 0) + 1
+                                if last_rec.get(it):
+                                    tr = last_rec[it].pop(0)
+                                    if t and tr and tr != _dt.min:
+                                        lat = (t - tr).total_seconds() * 1000.0
+                                        latencies.setdefault(it, []).append(lat)
+                            # Support external listener prints: Text lines -> map to intents
+                            if "Text:" in line and "[VOICE]" in line:
+                                try:
+                                    import re as __re
+                                    mm = __re.search(r"Text:\s*'([^']+)'", line)
+                                    if mm:
+                                        txt = mm.group(1)
+                                        try:
+                                            from app.voice.recognizer import map_utterance_to_intent as __map
+                                            it2 = __map(txt) or None
+                                        except Exception:
+                                            it2 = None
+                                        if it2:
+                                            recognized[it2] = recognized.get(it2, 0) + 1
+                                            last_rec.setdefault(it2, []).append(t or _dt.min)
+                                except Exception:
+                                    pass
+                except Exception:
+                    pass
+
+            for p in logs_to_parse:
+                _parse_file(p)
 
         intents = sorted(set(list(recognized.keys()) + list(executed.keys())))
         acc = {}
@@ -295,7 +347,7 @@ def export_voice(log_path: Path, out_dir: Path, *, window_start_utc: Optional[da
         logger.warning("export_voice fallo: {}", exc)
 
 
-def export_performance(base_url: str, db_path: Path, log_path: Path, out_dir: Path, *, window_start_utc: Optional[datetime] = None, window_end_utc: Optional[datetime] = None, posture_series: Optional[Iterable[Any]] = None) -> None:
+def export_performance(base_url: str, db_path: Path, log_path: Path, out_dir: Path, *, window_start_utc: Optional[datetime] = None, window_end_utc: Optional[datetime] = None, posture_series: Optional[Iterable[Any]] = None, voice_recognized: Optional[list] = None, voice_executed: Optional[list] = None) -> None:
     try:
         import requests
         import sqlite3
@@ -359,41 +411,96 @@ def export_performance(base_url: str, db_path: Path, log_path: Path, out_dir: Pa
         b_p95 = sorted(b_gaps)[int(0.95 * len(b_gaps)) - 1] if b_gaps else 0.0
         b_fps = (1000.0 / (sum(b_gaps) / len(b_gaps))) if b_gaps else 0.0
 
-        # Voice (latencies from log)
-        TIME_RE = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d{3,6})?)")
-        REC_RE = re.compile(r"Intent '([a-z]+)' reconocido(?: \(texto='.*'\))?")
-        EXEC_RE = re.compile(r"Intent '([a-z]+)' ejecutado")
-        def parse_time_prefix(line: str):
-            m = TIME_RE.match(line)
-            if not m:
-                return None
-            ts = m.group(1)
-            for fmt in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S"):
-                try:
-                    return _dt.strptime(ts, fmt)
-                except Exception:
-                    continue
-            return None
-        last_rec = {}
+        # Voice latencies: prefer session arrays if provided; else fallback to log parsing
         lats = []
-        try:
-            with log_path.open("r", encoding="utf-8", errors="ignore") as f:
-                for line in f:
-                    t = parse_time_prefix(line)
-                    m = REC_RE.search(line)
-                    if m:
-                        it = m.group(1)
-                        last_rec.setdefault(it, []).append(t or _dt.min)
+        if voice_recognized is not None and voice_executed is not None:
+            from datetime import datetime as __dt
+            def _parse_iso(ts: str) -> __dt:
+                try:
+                    return __dt.fromisoformat(ts)
+                except Exception:
+                    return __dt.min
+            rec_map: dict[str, list[__dt]] = {}
+            for ev in voice_recognized:
+                it = str(ev.get("intent") or "")
+                tt = _parse_iso(str(ev.get("timestamp") or ""))
+                if window_start_utc and tt < window_start_utc:
+                    continue
+                if window_end_utc and tt > window_end_utc:
+                    continue
+                rec_map.setdefault(it, []).append(tt)
+            for ev in voice_executed:
+                it = str(ev.get("intent") or "")
+                tt = _parse_iso(str(ev.get("timestamp") or ""))
+                if window_start_utc and tt < window_start_utc:
+                    continue
+                if window_end_utc and tt > window_end_utc:
+                    continue
+                if rec_map.get(it):
+                    tr = rec_map[it].pop(0)
+                    if tt and tr and tr != __dt.min:
+                        lats.append((tt - tr).total_seconds() * 1000.0)
+        else:
+            TIME_RE = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d{3,6})?)")
+            REC_RE = re.compile(r"Intent '([a-z]+)' reconocido(?: \(texto='.*'\))?")
+            EXEC_RE = re.compile(r"Intent '([a-z]+)' ejecutado")
+            def parse_time_prefix(line: str):
+                m = TIME_RE.match(line)
+                if not m:
+                    return None
+                ts = m.group(1)
+                for fmt in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S"):
+                    try:
+                        return _dt.strptime(ts, fmt)
+                    except Exception:
                         continue
-                    m = EXEC_RE.search(line)
-                    if m:
-                        it = m.group(1)
-                        if last_rec.get(it):
-                            tr = last_rec[it].pop(0)
-                            if t and tr and tr != _dt.min:
-                                lats.append((t - tr).total_seconds() * 1000.0)
-        except Exception:
-            pass
+                return None
+            last_rec = {}
+            def _parse_file(p: Path) -> None:
+                try:
+                    with p.open("r", encoding="utf-8", errors="ignore") as f:
+                        for line in f:
+                            t = parse_time_prefix(line)
+                            m = REC_RE.search(line)
+                            if m:
+                                it = m.group(1)
+                                last_rec.setdefault(it, []).append(t or _dt.min)
+                                continue
+                            m = EXEC_RE.search(line)
+                            if m:
+                                it = m.group(1)
+                                if last_rec.get(it):
+                                    tr = last_rec[it].pop(0)
+                                    if t and tr and tr != _dt.min:
+                                        lats.append((t - tr).total_seconds() * 1000.0)
+                            # Support external listener prints
+                            if "Text:" in line and "[VOICE]" in line:
+                                try:
+                                    import re as __re
+                                    mm = __re.search(r"Text:\s*'([^']+)'", line)
+                                    if mm:
+                                        txt = mm.group(1)
+                                        try:
+                                            from app.voice.recognizer import map_utterance_to_intent as __map
+                                            it2 = __map(txt) or None
+                                        except Exception:
+                                            it2 = None
+                                        if it2:
+                                            last_rec.setdefault(it2, []).append(t or _dt.min)
+                                except Exception:
+                                    pass
+                except Exception:
+                    pass
+            # Parse both app.log and voice.log if present
+            logs_to_parse = [log_path]
+            try:
+                alt = log_path.parent / "voice.log"
+                if alt.exists():
+                    logs_to_parse.append(alt)
+            except Exception:
+                pass
+            for p in logs_to_parse:
+                _parse_file(p)
         voice_p50 = median(lats) if lats else 0.0
         voice_p95 = sorted(lats)[int(0.95 * len(lats)) - 1] if lats else 0.0
 
@@ -437,7 +544,7 @@ def generate_all_exports(*, base_url: str = "http://127.0.0.1:8000", db_path: Op
     export_posture(base_url, out_dir, duration_min=sample_posture_minutes, posture_series=posture_series)
     export_biometrics(db, out_dir, window_start_utc=window_start_utc, window_end_utc=window_end_utc)
     export_voice(logs, out_dir, window_start_utc=window_start_utc, window_end_utc=window_end_utc, voice_recognized=voice_recognized, voice_executed=voice_executed)
-    export_performance(base_url, db, logs, out_dir, window_start_utc=window_start_utc, window_end_utc=window_end_utc, posture_series=posture_series)
+    export_performance(base_url, db, logs, out_dir, window_start_utc=window_start_utc, window_end_utc=window_end_utc, posture_series=posture_series, voice_recognized=voice_recognized, voice_executed=voice_executed)
 
     logger.info("Exportación completada: {}", out_dir)
     return out_dir

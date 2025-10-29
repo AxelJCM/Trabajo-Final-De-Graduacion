@@ -69,6 +69,19 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def post_voice_event(base_url: str, message: str, intent: Optional[str]) -> None:
+    base = base_url.rstrip("/")
+    try:
+        requests.post(
+            base + "/session/voice-event",
+            json={"message": message, "intent": intent},
+            timeout=5,
+        )
+    except Exception:
+        # Best-effort: if this fails, we still execute the action
+        pass
+
+
 def trigger_intent(intent: str, base_url: str) -> None:
     global cycle_index
     base = base_url.rstrip("/")
@@ -96,7 +109,8 @@ def trigger_intent(intent: str, base_url: str) -> None:
             cycle_index = (cycle_index + 1) % len(EXERCISE_CYCLE)
             exercise = EXERCISE_CYCLE[cycle_index]
             url = base + "/session/exercise"
-            resp = requests.post(url, json={"exercise": exercise, "reset": True}, timeout=5)
+            # Do NOT reset totals when switching exercises within a session
+            resp = requests.post(url, json={"exercise": exercise, "reset": False}, timeout=5)
             resp.raise_for_status()
             print(f"[VOICE] Intent 'next' executed -> {url} ({exercise})")
             return
@@ -388,6 +402,9 @@ def main() -> None:
                         if last_intent == intent and (now - last_intent_ts) < args.dedupe_seconds:
                             print(f"[VOICE] Intent '{intent}' ignored (duplicate)")
                         else:
+                            # Report recognized event to the server for session-scoped metrics
+                            msg = f'Voz: "{text}" -> {intent}'
+                            post_voice_event(args.base_url, msg, intent)
                             trigger_intent(intent, args.base_url)
                             last_intent = intent
                             last_intent_ts = now
