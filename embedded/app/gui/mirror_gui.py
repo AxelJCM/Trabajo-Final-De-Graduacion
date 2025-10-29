@@ -386,7 +386,8 @@ class OverlayWindow(QtWidgets.QWidget):  # type: ignore
         duration = _fmt_duration(session.get("duration_sec"))
         exercise_raw = posture.get("exercise") or session.get("exercise") or "--"
         exercise = str(exercise_raw).replace("_", " ").title()
-        reps = posture.get("rep_count", 0)
+        # Mostrar reps del ejercicio actual (no el total de la sesión)
+        reps = posture.get("current_exercise_reps", posture.get("rep_count", 0))
         phase = posture.get("phase_label") or posture.get("phase") or "--"
         quality = posture.get("quality")
         fps = (self._latest_metrics.get("fps") if hasattr(self, "_latest_metrics") else None) or posture.get("fps")
