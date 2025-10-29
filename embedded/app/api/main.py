@@ -116,6 +116,9 @@ async def root(code: str | None = None, state: str | None = None):
         if state:
             qp.append(("state", state))
         return RedirectResponse(url="/auth/fitbit/callback?" + urllib.parse.urlencode(qp), status_code=302)
+    # Redirect depending on environment: 'prod' -> /reports/view (minimal), otherwise debug view
+    if settings.environment == "prod":
+        return RedirectResponse(url="/reports/view", status_code=302)
     return RedirectResponse(url="/debug/view", status_code=302)
 
 

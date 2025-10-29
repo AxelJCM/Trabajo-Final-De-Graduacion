@@ -77,6 +77,9 @@ _state: dict[str, Any] = {
     "last_summary": None,
     "voice_event": None,
     "voice_event_seq": 0,
+    # session-scoped capture for Cap. 4
+    "voice_recognized": [],  # list of {intent, timestamp}
+    "voice_executed": [],    # list of {intent, timestamp}
 }
 
 
@@ -98,6 +101,14 @@ def session_start(payload: Optional[dict] = None) -> Envelope:
         _state["last_summary"] = None
         pose_estimator.set_counting_enabled(True)
         _mark_command("resume")
+        # Register execution for 'start' intent when resuming
+        try:
+            ev = {"intent": "start", "timestamp": now.isoformat()}
+            arr = _state.get("voice_executed") or []
+            arr.append(ev)
+            _state["voice_executed"] = arr
+        except Exception:
+            pass
         logger.info("Session resumed (exercise param ignored on resume)")
         return Envelope(
             success=True,
@@ -128,11 +139,30 @@ def session_start(payload: Optional[dict] = None) -> Envelope:
             "exercise": pose_estimator.exercise,
             "requires_start": False,
             "last_summary": None,
+            # reset per-session arrays
+            "voice_recognized": [],
+            "voice_executed": [],
         }
     )
     pose_estimator.set_counting_enabled(True)
     _mark_command("start")
+    # Register execution for 'start'
+    try:
+        ev = {"intent": "start", "timestamp": now.isoformat()}
+        arr = _state.get("voice_executed") or []
+        arr.append(ev)
+        _state["voice_executed"] = arr
+    except Exception:
+        pass
     logger.info("Session started exercise={} reset_totals={}", pose_estimator.exercise, reset_totals)
+    # Start posture recorder thread
+    try:
+        from app.core.session_recorder import SessionRecorder
+        rec = SessionRecorder(pose_estimator, sample_hz=5.0)
+        rec.start()
+        _state["recorder"] = rec
+    except Exception as exc:  # pragma: no cover - best effort
+        logger.warning("No se pudo iniciar SessionRecorder: {}", exc)
     return Envelope(
         success=True,
         data={
@@ -154,6 +184,14 @@ def session_pause() -> Envelope:
     _state["status"] = "paused"
     pose_estimator.set_counting_enabled(False)
     _mark_command("pause")
+    # Register execution for 'pause'
+    try:
+        ev = {"intent": "pause", "timestamp": now.isoformat()}
+        arr = _state.get("voice_executed") or []
+        arr.append(ev)
+        _state["voice_executed"] = arr
+    except Exception:
+        pass
     logger.info("Session paused")
     return Envelope(
         success=True,
@@ -217,6 +255,22 @@ def session_stop(request: Request, db: Session = Depends(get_db)) -> Envelope:
         "avg_quality": avg_quality,
     }
 
+    # Capture recorder samples before reset
+    samples = []
+    try:
+        rec = _state.get("recorder")
+        if rec is not None:
+            try:
+                rec.stop()
+            except Exception:
+                pass
+            try:
+                samples = rec.get_samples()
+            except Exception:
+                samples = []
+    finally:
+        _state["recorder"] = None
+
     pose_estimator.reset_session(exercise=_state.get("exercise"), preserve_totals=False)
     pose_estimator.set_counting_enabled(False)
     _state.update(
@@ -230,7 +284,33 @@ def session_stop(request: Request, db: Session = Depends(get_db)) -> Envelope:
         }
     )
     _mark_command("stop")
+    # Register execution for 'stop'
+    try:
+        ev = {"intent": "stop", "timestamp": now.isoformat()}
+        arr = _state.get("voice_executed") or []
+        arr.append(ev)
+        _state["voice_executed"] = arr
+    except Exception:
+        pass
     logger.info("Session stopped duration={} reps={}", duration_total, total_reps)
+
+    # Trigger metrics exporter asynchronously (best-effort)
+    try:
+        from app.metrics_exporter import generate_all_exports_async
+        base_url = str(request.base_url).rstrip("/")
+        # Voice arrays
+        voice_rec = _state.get("voice_recognized") or []
+        voice_exec = _state.get("voice_executed") or []
+        generate_all_exports_async(
+            base_url=base_url,
+            window_start_utc=started,
+            window_end_utc=now,
+            posture_series=samples,
+            voice_recognized=voice_rec,
+            voice_executed=voice_exec,
+        )
+    except Exception as exc:  # pragma: no cover - telemetry only
+        logger.warning("No se pudo iniciar metrics_exporter: {}", exc)
 
     return Envelope(
         success=True,
@@ -256,6 +336,14 @@ def set_exercise(payload: dict) -> Envelope:
     pose_estimator.set_exercise(str(ex), reset=reset)
     _state["exercise"] = pose_estimator.exercise
     _mark_command("next")
+    # Register voice execution (if command came from voice)
+    try:
+        ev = {"intent": "next", "timestamp": _now().isoformat()}
+        arr = _state.get("voice_executed") or []
+        arr.append(ev)
+        _state["voice_executed"] = arr
+    except Exception:
+        pass
     logger.info("Exercise changed to {} reset={}", pose_estimator.exercise, reset)
     return Envelope(success=True, data={"exercise": pose_estimator.exercise, "reset": reset})
 
@@ -305,6 +393,14 @@ def session_voice_event(payload: Optional[dict] = None) -> Envelope:
         return Envelope(success=False, error="missing_message")
     intent = data.get("intent")
     event = _register_voice_event(str(message), intent=str(intent) if intent is not None else None)
+    # Append to session-scoped recognized list
+    try:
+        ev = {"intent": event.get("intent"), "timestamp": event.get("timestamp")}
+        arr = _state.get("voice_recognized") or []
+        arr.append(ev)
+        _state["voice_recognized"] = arr
+    except Exception:
+        pass
     return Envelope(success=True, data=event)
 
 

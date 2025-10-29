@@ -6,6 +6,7 @@ from typing import Iterator
 from pathlib import Path
 import time
 from datetime import datetime, timezone
+import json
 
 from app.api.routers.posture import pose_estimator
 from app.core.config import get_settings
@@ -13,6 +14,10 @@ from app.core.db import SessionLocal
 from app.core.dal import get_tokens
 
 router = APIRouter()
+
+# Exports directory helper
+def _exports_root() -> Path:
+    return Path(__file__).resolve().parent.parent.parent / "data" / "exports"
 
 
 def mjpeg_frames(overlay: bool = True, app_state=None) -> Iterator[bytes]:
@@ -176,6 +181,8 @@ async def stream(request: Request, overlay: int = 1) -> StreamingResponse:
         },
     )
 
+        
+
 
 @router.get("/debug/logs")
 async def logs_tail(lines: int = 200) -> Response:
@@ -245,6 +252,7 @@ async def view() -> HTMLResponse:
                     <button class=\"btn\" onclick=\"loginWithHost()\">Login with this IP</button>
                     <span class=\"status\" id=\"fitbitStatus\">Fitbit: checking…</span>
                     <a href=\"/auth/fitbit/status\" target=\"_blank\" title=\"Open status JSON\">JSON</a>
+                    <a class=\"btn\" href=\"/debug/exports\" target=\"_blank\">Exports</a>
                 </div>
                 <small id="fitbitSample" style="color:#bbb"></small>
                 <small>
@@ -332,6 +340,117 @@ async def view() -> HTMLResponse:
         </html>
         """
     return HTMLResponse(content=html)
+
+
+@router.get("/debug/exports", response_class=HTMLResponse)
+async def exports_view() -> HTMLResponse:
+    root = _exports_root()
+    root.mkdir(parents=True, exist_ok=True)
+    items = []
+    for sub in sorted([p for p in root.iterdir() if p.is_dir()], reverse=True):
+        files = [f.name for f in sub.iterdir() if f.is_file()]
+        items.append({"dir": sub.name, "files": files})
+    html = [
+        "<!doctype html>",
+        "<html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>",
+        "<title>Exports</title>",
+        "<style>body{font-family:sans-serif;background:#111;color:#eee;padding:12px} a{color:#8ab4f8} .box{border:1px solid #333;border-radius:8px;padding:12px;margin-bottom:12px} .btn{background:#1976d2;color:#fff;border:none;padding:8px 12px;border-radius:4px;cursor:pointer} .btn:hover{background:#1565c0}</style>",
+        "</head><body>",
+        "<h3>Validation Exports</h3>",
+        "<p><button class='btn' onclick=runExport()>Run export now</button> <small id='status'></small></p>",
+        "<div id='list'>",
+    ]
+    for item in items:
+        html.append(f"<div class='box'><b>{item['dir']}</b><ul>")
+        for f in sorted(item["files"]):
+            html.append(f"<li><a href='/debug/exports/file?dir={item['dir']}&name={f}' target='_blank'>{f}</a></li>")
+        html.append("</ul></div>")
+    html += [
+        "</div>",
+        "<p><a href='/reports/view' target='_blank'>Open Reports View</a> | <a href='/debug/view' target='_blank'>Back to Debug View</a></p>",
+        "<script>async function runExport(){const s=document.getElementById('status');s.textContent='Running…';try{const r=await fetch('/debug/exports/run',{method:'POST'});const j=await r.json();s.textContent='Started: '+(j.dir||'');setTimeout(()=>location.reload(),1500);}catch(e){s.textContent='Error: '+e}}</script>",
+        "</body></html>",
+    ]
+    return HTMLResponse("".join(html))
+
+
+@router.get("/debug/exports/file")
+async def exports_file(dir: str, name: str) -> Response:
+    root = _exports_root()
+    target = (root / dir / name).resolve()
+    if not str(target).startswith(str(root.resolve())):
+        return PlainTextResponse("Forbidden", status_code=403)
+    if not target.exists() or not target.is_file():
+        return PlainTextResponse("Not found", status_code=404)
+    media = "text/plain"
+    if name.endswith(".json"):
+        media = "application/json"
+    elif name.endswith(".csv"):
+        media = "text/csv"
+    return Response(content=target.read_bytes(), media_type=media)
+
+
+@router.post("/debug/exports/run")
+async def exports_run(request: Request) -> JSONResponse:
+    """Trigger metrics exporter asynchronously and return the target directory name."""
+    try:
+        from app.metrics_exporter import generate_all_exports_async
+        base_url = str(request.base_url).rstrip("/")
+        # fire-and-forget; exporter will create a timestamped directory
+        generate_all_exports_async(base_url=base_url)
+        return JSONResponse({"ok": True})
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+
+@router.get("/reports/view")
+async def reports_view() -> HTMLResponse:
+    """Minimal viewer for the latest export (for production Pi)."""
+    root = _exports_root()
+    root.mkdir(parents=True, exist_ok=True)
+    latest = None
+    for sub in sorted([p for p in root.iterdir() if p.is_dir()], reverse=True):
+        latest = sub
+        break
+    summary = {}
+    if latest:
+        for name in ("posture_metrics.json", "biometrics_summary.json", "voice_summary.json", "performance_summary.json"):
+            p = latest / name
+            if p.exists():
+                try:
+                    summary[name] = json.loads(p.read_text(encoding="utf-8"))
+                except Exception:
+                    pass
+    html = [
+        "<!doctype html>",
+        "<html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>",
+        "<title>Resultados</title>",
+        "<style>body{font-family:sans-serif;background:#111;color:#eee;padding:12px} code{background:#222;padding:2px 4px;border-radius:4px} .grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))} .box{border:1px solid #333;border-radius:8px;padding:12px}</style>",
+        "</head><body>",
+        "<h3>Resultados de Validación</h3>",
+        f"<p>Directorio: <code>{latest.name if latest else 'N/A'}</code> <a href='/debug/exports' style='color:#8ab4f8'>Ver todos</a></p>",
+        "<div class='grid'>",
+    ]
+    def kv(d: dict, keys: list[str]) -> str:
+        return "<br/>".join([f"<b>{k}</b>: {d.get(k, '')}" for k in keys])
+    pm = summary.get("posture_metrics.json") or {}
+    html.append(f"<div class='box'><h4>Postura</h4>{kv(pm, ['fps','latency_ms_p50','latency_ms_p95','quality_avg'])}</div>")
+    bm = summary.get("biometrics_summary.json") or {}
+    html.append(f"<div class='box'><h4>Biometría</h4>{kv(bm, ['freshness_s','coverage_intraday_pct','avg_update_latency_s'])}</div>")
+    vs = summary.get("voice_summary.json") or {}
+    intents = list((vs.get('per_intent') or {}).keys())
+    if intents:
+        first = intents[0]
+        vi = vs.get('per_intent', {}).get(first, {})
+        html.append(f"<div class='box'><h4>Voz</h4>Intentos: {', '.join(intents)}<br/><b>{first}</b> acc: {vi.get('accuracy_pct',0)}% lat(ms): {vi.get('latency_ms',0)}</div>")
+    pf = summary.get("performance_summary.json") or {}
+    html.append(f"<div class='box'><h4>Desempeño</h4>{kv(pf, ['p50_total','p95_total','fps_total'])}</div>")
+    html += [
+        "</div>",
+        "<p><small>Descargas: <a href='/debug/exports' style='color:#8ab4f8'>CSV/JSON</a></small></p>",
+        "</body></html>",
+    ]
+    return HTMLResponse("".join(html))
 
 
 @router.get("/debug/metrics")
