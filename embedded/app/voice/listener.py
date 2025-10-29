@@ -128,9 +128,10 @@ class VoiceIntentListener:
             if _post("/session/stop", {}):
                 self._session_started = False
         elif intent == "next":
+            # Cambiar ejercicio sin resetear los totales de la sesion
             self._cycle_index = (self._cycle_index + 1) % len(self._exercise_cycle)
             exercise = self._exercise_cycle[self._cycle_index]
-            _post("/session/exercise", {"exercise": exercise, "reset": True})
+            _post("/session/exercise", {"exercise": exercise, "reset": False})
         else:
             logger.info("Intent '{}' detectado (sin accion configurada)", intent)
         self._refresh_session_flag()

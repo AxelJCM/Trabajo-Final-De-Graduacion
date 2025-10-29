@@ -64,8 +64,18 @@ def export_posture(base_url: str, out_dir: Path, *, duration_min: float = 0.0, p
             s = requests.get(f"{base}/session/status", timeout=3)
             s.raise_for_status()
             sd = (s.json() or {}).get("data") or {}
-            quality_avg = float(sd.get("avg_quality") or 0.0)
-            rep_totals = sd.get("rep_totals") or {}
+            # Prefer windowed session summary (set on stop) to avoid reading reset live totals
+            summary = sd.get("session_summary") or {}
+            if isinstance(summary, dict):
+                rep_totals = summary.get("rep_breakdown") or {}
+                qa = summary.get("avg_quality")
+                if qa is not None:
+                    quality_avg = float(qa)
+            # Fallbacks if summary missing
+            if not rep_totals:
+                rep_totals = sd.get("rep_totals") or {}
+            if quality_avg == 0.0:
+                quality_avg = float(sd.get("avg_quality") or 0.0)
         except Exception as exc:
             logger.warning("export_posture: no session status: {}", exc)
         # Write CSV and JSON summary
