@@ -463,7 +463,13 @@ class PoseEstimator:
         if self.exercise == "squat":
             candidates = [v for v in (angles.left_knee, angles.right_knee) if v is not None]
         elif self.exercise == "pushup":
-            candidates = [v for v in (angles.left_elbow, angles.right_elbow) if v is not None]
+            # Front-facing robustness: for pushups, prefer the minimum elbow angle (the arm that bends more)
+            # instead of averaging both. This makes transitions easier to detect even with partial occlusions.
+            elbows = [v for v in (angles.left_elbow, angles.right_elbow) if v is not None]
+            if elbows:
+                # Use min to reflect the deepest flexion
+                return float(min(elbows))
+            candidates = []
         else:  # crunch (front-facing): prefer hip angles; fallback to shoulder-hip alignment
             hip_candidates = [v for v in (angles.left_hip, angles.right_hip) if v is not None]
             if hip_candidates:
